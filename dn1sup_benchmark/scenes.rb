@@ -1,0 +1,118 @@
+# frozen_string_literal: true
+# =============================================================================
+# dn1sup_benchmark/scenes.rb — детерминированные генераторы тестовых сцен.
+#
+# Все сцены строятся только по формулам от индексов (без rand) — на любой
+# машине и в любой версии SketchUp геометрия идентична, поэтому метрики
+# разных версий сравнимы. Сцены строятся ВНУТРИ уже открытой undo-операции
+# (её открывает Runner); Runner же делает entities.clear! + abort_operation.
+#
+# Каждый build_* возвращает хеш с полезными для тестов ссылками
+# (путь вложенных групп, число сущностей и т.п.).
+# =============================================================================
+
+module Dn1supBenchmark
+  module Scenes
+    module_function
+
+    # --- nested: цепочка вложенных групп глубиной depth ------------------------
+    # На каждом уровне items граней со смещением по глубине уровня.
+    # Возвращает { 'path' => [g1, g2, ...], 'entities' => n }.
+    def build_nested(model, depth, items)
+      path = []
+      container = nil
+      count = 0
+      depth.times do |d|
+        ents = container.nil? ? model.entities : container.entities
+        g = ents.add_group
+        g.name = "lvl#{d + 1}"
+        items.times do |i|
+          x = (i % 4) * 150
+          y = ((i / 4) % 4) * 150
+          z = d * 40
+          g.entities.add_face([x, y, z], [x + 100, y, z],
+                              [x + 100, y + 100, z], [x, y + 100, z])
+          count += 1
+        end
+        path << g
+        container = g
+      end
+      { 'path' => path, 'entities' => count, 'depth' => depth }
+    end
+
+    # --- components: лес определений/сборок/инстансов --------------------------
+    # defs листовых определений (боксы по 12 граней), assemblies сборок
+    # (каждая = per_assembly инстансов листовых), сверху сетка grid×grid
+    # инстансов сборок. Возвращает счётчики для traverse/тестов.
+    def build_components(model, defs_n, assemblies_n, per_assembly, grid_n)
+      leaf_defs = []
+      defs_n.times do |i|
+        defn = model.definitions.add("dn1_leaf_#{i}")
+        w = 80 + (i % 5) * 30
+        h = 60 + ((i * 7) % 4) * 25
+        face = defn.entities.add_face([0, 0, 0], [w, 0, 0], [w, w, 0], [0, w, 0])
+        face.pushpull(h)
+        leaf_defs << defn
+      end
+
+      asm_defs = []
+      assemblies_n.times do |a|
+        defn = model.definitions.add("dn1_asm_#{a}")
+        per_assembly.times do |k|
+          tr = Geom::Transformation.new([((k % 3) * 250), (((k / 3) % 3) * 250), 0])
+          defn.entities.add_instance(leaf_defs[(a * per_assembly + k) % defs_n], tr)
+        end
+        asm_defs << defn
+      end
+
+      step = 900
+      grid_n.times do |r|
+        grid_n.times do |c|
+          tr = Geom::Transformation.new([c * step, r * step, 0])
+          model.entities.add_instance(asm_defs[(r * grid_n + c) % assemblies_n], tr)
+        end
+      end
+
+      top = grid_n * grid_n
+      { 'entities' => top + assemblies_n * per_assembly,
+        'top_instances' => top,
+        'leaf_defs' => defs_n, 'asm_defs' => assemblies_n,
+        'total_instances' => top + assemblies_n * per_assembly }
+    end
+
+    # --- grid: плотная сетка смежных квадратов n×n ------------------------------
+    def build_grid(model, n)
+      step = 100
+      count = 0
+      n.times do |i|
+        n.times do |j|
+          x0 = i * step
+          y0 = j * step
+          model.entities.add_face([x0, y0, 0], [x0 + step, y0, 0],
+                                  [x0 + step, y0 + step, 0], [x0, y0 + step, 0])
+          count += 1
+        end
+      end
+      { 'entities' => count, 'n' => n, 'faces' => count }
+    end
+
+    # --- textured: боксы под раскраску текстурными материалами -----------------
+    # Материалы НЕ назначаются здесь — это делают текстурные тесты.
+    def build_textured(model, boxes_n)
+      side = 120
+      per_row = Math.sqrt(boxes_n).ceil
+      per_row = 1 if per_row < 1
+      count = 0
+      boxes_n.times do |i|
+        x = (i % per_row) * (side * 2)
+        y = ((i / per_row) % per_row) * (side * 2)
+        h = 60 + ((i * 13) % 5) * 30
+        face = model.entities.add_face([x, y, 0], [x + side, y, 0],
+                                       [x + side, y + side, 0], [x, y + side, 0])
+        face.pushpull(h)
+        count += 1
+      end
+      { 'entities' => count * 6, 'boxes' => count }
+    end
+  end
+end
