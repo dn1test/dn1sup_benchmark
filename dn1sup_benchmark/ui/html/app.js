@@ -114,14 +114,12 @@
     o.doc_enabled = $('st-doc').checked;
     if (state.profile === 'custom') {
       o.grid = { n: parseInt($('cu-grid-n').value, 10) || 70 };
-      o.components = { defs: parseInt($('cu-defs').value, 10) || 10, assemblies: 6, per_assembly: 4,
-                       grid: parseInt($('cu-comp-grid').value, 10) || 10 };
       o.nested = { depth: 6, items: 4 };
       o.textured = { boxes: parseInt($('cu-boxes').value, 10) || 24 };
       o.api01_loops = parseInt($('cu-loops').value, 10) || 2500;
       o.api02_groups = 100;
       o.api03_defs = parseInt($('cu-defs').value, 10) || 10;
-      o.api03_instances = (o.components.grid || 10) * (o.components.grid || 10);
+      o.api03_instances = (parseInt($('cu-comp-grid').value, 10) || 10) * (parseInt($('cu-comp-grid').value, 10) || 10);
       o.api05_objects = 100;
       o.api06_faces = parseInt($('cu-tx').value, 10) || 100;
       o.pushpull = 8; o.move = 10; o.add_faces = 8; o.tex_apply = 60;

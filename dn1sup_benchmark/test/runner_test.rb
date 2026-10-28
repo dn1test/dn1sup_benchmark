@@ -29,22 +29,35 @@ module Dn1supBenchmark::Test
     assert_equal('custom', custom['profile'], 'custom принимает полный набор параметров')
   end
 
-  test 'steps: план v2 (ruby, 5 сцен, 6 fps, doc)' do
+  test 'профили укладываются в минуту: сетка, api01 и повторы ограничены' do
+    # Решение владельца 2026-10-28: полный прогон любого профиля ≈ ≤1 мин.
+    R::PROFILES.each do |name, prof|
+      assert(prof['grid']['n'] <= 150, "#{name}: сетка #{prof['grid']['n']}² слишком велика")
+      assert(prof['api01_loops'] <= 10_000, "#{name}: api01_loops=#{prof['api01_loops']} слишком велик")
+      assert(prof['iters'] <= 3, "#{name}: iters=#{prof['iters']} слишком много")
+      assert(prof['fps_s'] <= 2.0, "#{name}: fps_s=#{prof['fps_s']} слишком долго")
+    end
+  end
+
+  test 'steps: план v3 (ruby, 4 сцены, 5 fps, doc)' do
     steps = R.steps('small')
     kinds = steps.map { |s| s['kind'] }
     assert_equal('begin', kinds.first)
     assert_equal('finish', kinds.last)
-    assert_equal(5, kinds.count('scene'), "ожидали 5 сцен: #{kinds}")
-    assert_equal(6, kinds.count('fps'), 'компоненты + 4 режима сетки + текстуры')
+    assert_equal(4, kinds.count('scene'), "ожидали 4 сцены: #{kinds}")
+    assert_equal(5, kinds.count('fps'), '4 режима сетки + текстуры')
     assert(kinds.include?('ruby'), 'нет RUBY-шага')
     assert(kinds.include?('doc'), 'нет DOC-шага')
     scenes = steps.select { |s| s['kind'] == 'scene' }.map { |s| s['scene'] }
-    assert_equal(%w[basics nested components grid textured], scenes, 'порядок сцен')
+    assert_equal(%w[basics nested grid textured], scenes, 'порядок сцен')
+    refute(scenes.include?('components'), 'сцена components удалена (вешает вьюпорт SU2027)')
     modes = steps.select { |s| s['kind'] == 'fps' }.map { |s| s['mode'] }
     %w[static orbit pan zoom].each do |m|
       assert(modes.include?(m), "нет FPS-режима #{m}")
     end
     refute(modes.include?('pages'), 'page-switch запрещён (инцидент 2026-10-28)')
+    refute(steps.any? { |s| s['id'] == 'fps_components_static' },
+           'fps_components_static удалён (вешает вьюпорт SU2027)')
   end
 
   test 'steps: неизвестный профиль даёт ошибку' do
@@ -53,7 +66,7 @@ module Dn1supBenchmark::Test
 
   test 'plan_preview: предупреждение для large' do
     pp = R.plan_preview('large')
-    assert(pp['warning'].to_s.include?('500'), 'предупреждение должно упоминать объём')
+    assert(pp['warning'].to_s.include?('минут'), 'предупреждение должно оценивать время прогона')
     assert_equal(R.steps('large').size, pp['steps'].size, 'в превью все шаги')
     assert_nil(R.plan_preview('small')['warning'])
   end

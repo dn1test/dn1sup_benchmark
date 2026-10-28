@@ -36,14 +36,6 @@ module Dn1supBenchmark::Test
     assert_equal(36, info['faces'], '6×6 = 36 граней')
   end
 
-  test 'components: определения, сборки, инстансы' do
-    info = self.smoke_scene('components') do |model|
-      Dn1supBenchmark::Scenes.build_components(model, 4, 2, 2, 3)
-    end
-    assert_equal(9, info['top_instances'], 'сетка 3×3 верхних инстансов')
-    assert_equal(4, info['leaf_defs'], 'число листовых определений')
-  end
-
   test 'textured: боксы под раскраску' do
     info = self.smoke_scene('textured') do |model|
       Dn1supBenchmark::Scenes.build_textured(model, 5)

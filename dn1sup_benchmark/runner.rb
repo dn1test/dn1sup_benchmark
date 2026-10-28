@@ -33,7 +33,13 @@ module Dn1supBenchmark
   module Runner
     # Версия НАБОРА тестов: меняется при изменении состава/методики
     # (сравнение прогонов с разными suite-версиями помечается несовместимым).
-    SUITE_VERSION = '2'
+    # 3 — удалены сцена components (вместе с API-04 и легаси-дублями) и
+    #     fps_components_static: на SU2027 вьюпорт зависает (100% CPU) на
+    #     простое после сцены ~80 000 вложенных инстансов компонентов
+    #     (large: 10 000 сборок × 8 листьев), что блокировало и FPS-замер,
+    #     и все последующие шаги; профили medium/large перекалиброваны под
+    #     полный прогон ~1 минута (см. CHANGELOG 0.4.0).
+    SUITE_VERSION = '3'
     # Версия конкретного теста: менять при изменении его измеряемой операции.
     TEST_VERSION = '1'
 
@@ -65,16 +71,18 @@ module Dn1supBenchmark
       end
     end
 
-    # Профили ТЗ: явные цели по рёбрам/инстансам; параметры сцен выводятся
-    # формулами и записываются в отчёт (meta.params + параметры каждого теста).
-    #   grid n          → n² граней, ≈2·n·(n+1) рёбер (смежная сетка);
-    #   components grid → grid² верхних инстансов сборок;
-    #   api01_loops     → loops контуров × 4 ребра + loops граней.
+    # Профили: три ступени нагрузки; КАЖДЫЙ полный прогон укладывается
+    # примерно в минуту (решение владельца 2026-10-28 после того, как
+    # large по целям ТЗ — 500 тыс. рёбер — стал бенчмарком на десятки минут:
+    # SU2027 деградирует на вставке в большие модели). Параметры сцен
+    # записываются в отчёт (meta.params + параметры каждого теста).
+    #   grid n      → n² граней, ≈2·n·(n+1) рёбер (смежная сетка);
+    #   api03       → instances инстансов компонентов;
+    #   api01_loops → loops контуров × 4 ребра + loops граней.
     PROFILES = {
       'small' => {
         'targets' => { 'edges' => 10_000, 'instances' => 100 },
         'grid' => { 'n' => 70 },
-        'components' => { 'defs' => 12, 'assemblies' => 6, 'per_assembly' => 4, 'grid' => 10 },
         'nested' => { 'depth' => 6, 'items' => 4 },
         'textured' => { 'boxes' => 24 },
         'api01_loops' => 2_500,
@@ -87,39 +95,31 @@ module Dn1supBenchmark
         'doc_enabled' => true
       },
       'medium' => {
-        'targets' => { 'edges' => 100_000, 'instances' => 1_000 },
-        'grid' => { 'n' => 223 },
-        'components' => { 'defs' => 24, 'assemblies' => 10, 'per_assembly' => 6, 'grid' => 32 },
-        'nested' => { 'depth' => 6, 'items' => 12 },
-        'textured' => { 'boxes' => 96 },
-        'api01_loops' => 25_000,
-        'api02_groups' => 1_000,
-        'api03_defs' => 24, 'api03_instances' => 1_000,
-        'api05_objects' => 500,
-        'api06_faces' => 400,
-        'fps_s' => 3.0, 'iters' => 4,
-        'pushpull' => 40, 'move' => 40, 'add_faces' => 20, 'tex_apply' => 400,
+        'targets' => { 'edges' => 16_000, 'instances' => 300 },
+        'grid' => { 'n' => 90 },
+        'nested' => { 'depth' => 6, 'items' => 8 },
+        'textured' => { 'boxes' => 48 },
+        'api01_loops' => 4_000,
+        'api02_groups' => 300,
+        'api03_defs' => 16, 'api03_instances' => 300,
+        'api05_objects' => 200,
+        'api06_faces' => 120,
+        'fps_s' => 2.0, 'iters' => 2,
+        'pushpull' => 16, 'move' => 16, 'add_faces' => 12, 'tex_apply' => 150,
         'doc_enabled' => true
       },
       'large' => {
-        'targets' => { 'edges' => 500_000, 'instances' => 10_000 },
-        'grid' => { 'n' => 500 },
-        'components' => { 'defs' => 32, 'assemblies' => 12, 'per_assembly' => 8, 'grid' => 100 },
+        'targets' => { 'edges' => 29_000, 'instances' => 600 },
+        'grid' => { 'n' => 120 },
         'nested' => { 'depth' => 6, 'items' => 12 },
-        'textured' => { 'boxes' => 240 },
-        # Цель «500 тыс. рёбер» обеспечивает сцена grid (500×500 ≈ 501 тыс.
-        # рёбер). API-01 ограничен: 125 тыс. контуров в одной коллекции
-        # деградируют по скорости на порядки (замерено 2026-10-28, SU2027 —
-        # часы работы), повторяя нагрузку grid без новой информации.
-        'api01_loops' => 25_000,
-        # api02 ограничен 1000 групп на всех тяжёлых профилях — сами по себе
-        # группы дорогие, цель профиля отражают api01/api03 (зафиксировано).
-        'api02_groups' => 1_000,
-        'api03_defs' => 32, 'api03_instances' => 10_000,
-        'api05_objects' => 1_000,
-        'api06_faces' => 400,
-        'fps_s' => 2.0, 'iters' => 2,
-        'pushpull' => 40, 'move' => 40, 'add_faces' => 20, 'tex_apply' => 400,
+        'textured' => { 'boxes' => 72 },
+        'api01_loops' => 6_000,
+        'api02_groups' => 500,
+        'api03_defs' => 24, 'api03_instances' => 600,
+        'api05_objects' => 300,
+        'api06_faces' => 200,
+        'fps_s' => 1.5, 'iters' => 2,
+        'pushpull' => 20, 'move' => 20, 'add_faces' => 16, 'tex_apply' => 200,
         'doc_enabled' => true
       }
     }.freeze
@@ -128,8 +128,8 @@ module Dn1supBenchmark
     OVERRIDABLE = %w[iters fps_s doc_enabled].freeze
 
     PROFILE_WARNINGS = {
-      'large' => 'Профиль large строит ~500 000 рёбер и ~10 000 инстансов: ' \
-                 'прогон может занять десятки минут и сильно нагрузить систему.',
+      'large' => 'Самый тяжёлый профиль (сетка 120×120, 600 инстансов, ' \
+                 '2 повтора): полный прогон занимает около минуты.',
       'custom' => 'Пользовательский профиль: нагрузка определяется вашими параметрами.'
     }.freeze
 
@@ -184,10 +184,10 @@ module Dn1supBenchmark
             'label' => 'API-01…03, 05: рёбра/грани, группы, компоненты, атрибуты' },
           { 'kind' => 'scene', 'scene' => 'nested', 'category' => 'api',
             'label' => 'Сцена: вложенные группы (иерархия)' },
-          { 'kind' => 'scene', 'scene' => 'components', 'category' => 'api',
-            'label' => 'Сцена: компоненты (обход API-04, правки)' },
-          { 'kind' => 'fps', 'id' => 'fps_components_static', 'mode' => 'static', 'category' => 'graphics',
-            'name' => 'FPS: компоненты, статичный вид' },
+          # Сцена components и fps_components_static УДАЛЕНЫ (suite v3): на
+          # SU2027 вьюпорт зависает на простое после сцены ~80 000 вложенных
+          # инстансов (large), что блокировало FPS-замер и все последующие
+          # шаги. Детали — в CHANGELOG 0.4.0.
           { 'kind' => 'scene', 'scene' => 'grid', 'category' => 'api',
             'label' => 'Сцена: плотная сетка (API-06, pushpull, zoom, страницы)' },
           { 'kind' => 'fps', 'id' => 'fps_grid_static', 'mode' => 'static', 'category' => 'graphics',
@@ -425,38 +425,6 @@ module Dn1supBenchmark
             record_scene_gen('nested', Dn1supBenchmark.monotonic - t0, info)
             tests_nested(model, p)
             st['result'] = "ok: nested (entities=#{info['entities']})"
-          }]
-        when 'components'
-          cp = p['components']
-          top = cp['grid'] * cp['grid']
-          total = top + cp['assemblies'] * cp['per_assembly']
-          build = make_task(
-            [
-              { 'timed' => true, 'total' => cp['defs'], 'batch' => cp['defs'],
-                'work' => ->(from, to, ctx) {
-                  (ctx['leaf'] ||= []).concat(Scenes.components_leaf_defs(model, from, to, cp['defs']))
-                } },
-              { 'timed' => true, 'total' => cp['assemblies'], 'batch' => cp['assemblies'],
-                'work' => ->(from, to, ctx) {
-                  (ctx['asm'] ||= []).concat(Scenes.components_asm_defs(model, ctx['leaf'], from, to,
-                                                                        cp['assemblies'], cp['per_assembly'], cp['defs']))
-                } },
-              { 'timed' => true, 'total' => top, 'batch' => [top, 512].min,
-                'work' => ->(from, to, ctx) {
-                  Scenes.components_top(model, ctx['asm'], from, to, cp['grid'], cp['assemblies'])
-                } }
-            ],
-            ->(_times, _ph, _ctx) {
-              info = { 'entities' => total, 'top_instances' => top,
-                       'leaf_defs' => cp['defs'], 'asm_defs' => cp['assemblies'],
-                       'total_instances' => total }
-              record_scene_gen('components', build['phases'].sum { |ph| ph['sums'].to_f }, info)
-            }
-          )
-          st['jobs'] << [:task, build]
-          st['jobs'] << [:sync, -> {
-            tests_components(model, p)
-            st['result'] = "ok: components (entities=#{total})"
           }]
         when 'grid'
           n = p['grid']['n']
@@ -975,72 +943,6 @@ module Dn1supBenchmark
         end
       end
 
-      # -- сцена components: API-04 + легаси-тесты ----------------------------------------
-
-      def tests_components(model, params)
-        info = @state['scene_info']
-
-        # API-04: обход сущностей с проверкой количества. Правила подсчёта:
-        # только определения dn1_* (созданные сценой) и верхний уровень
-        # model.entities — содержимое пользовательской модели не учитывается.
-        expected_defs = info['leaf_defs'] + info['asm_defs']
-        measure('api', 'API-04', 'Обход сущностей: подсчёт со сверкой с ожидаемым',
-                'ms', params['iters'],
-                entities: info['total_instances'], ops: expected_defs + 2,
-                params: { 'count_rule' => 'определения dn1_* + верхний уровень model.entities',
-                          'expected_top_instances' => info['top_instances'],
-                          'expected_dn1_definitions' => expected_defs },
-                validate: proc do |counts|
-                  errs = []
-                  errs << "верхних инстансов #{counts['top']} вместо #{info['top_instances']}" if counts['top'] != info['top_instances']
-                  errs << "определений dn1_* #{counts['defs']} вместо #{expected_defs}" if counts['defs'] != expected_defs
-                  errs << "инстансов в определениях #{counts['in_defs']} вместо #{info['total_instances']}" if counts['in_defs'] != info['total_instances']
-                  errs
-                end) do |_i|
-          { 'top' => model.entities.grep(Sketchup::ComponentInstance).size,
-            'defs' => model.definitions.count { |d| d.name.start_with?('dn1_') },
-            'in_defs' => model.definitions.select { |d| d.name.start_with?('dn1_') }
-                                          .sum { |d| d.instances.size } }
-        end
-
-        # Обход дерева (легаси): суммарный подсчёт инстансов по определениям.
-        measure('api', 'traverse_tree', 'Обход дерева определений/инстансов',
-                'ms', params['iters'], entities: info['total_instances'],
-                validate: proc { |_r| [] }) do |_i|
-          count = 0
-          model.definitions.each { |d| count += d.instances.size }
-          raise 'обход насчитал 0' if count.zero?
-        end
-
-        # Перемещение верхних инстансов (round-trip туда-обратно) — правка,
-        # на которую вьюпорт отвечает пересчётом.
-        tops = model.entities.grep(Sketchup::ComponentInstance).first(params['move'])
-        measure('api', 'move_instances', "Перемещение инстансов (батч #{tops.size}, round-trip)",
-                'ms', params['iters'], entities: tops.size, ops: tops.size,
-                params: { 'batch' => tops.size, 'op' => 'transform! +50/-50 мм' }) do |i|
-          dir = i.even? ? 1 : -1
-          tr = Geom::Transformation.new(Geom::Vector3d.new(50 * dir, 0, 0))
-          tops.each { |inst| inst.transform!(tr) }
-        end
-
-        # Правка определения: все инстансы пересчитываются. Добавляем и стираем
-        # грани в листовом определении.
-        defn = model.definitions['dn1_leaf_0']
-        raise 'dn1_leaf_0 не найден' if defn.nil?
-
-        measure('api', 'editing_modify_definition', "Правка определения (add+erase #{params['add_faces']} граней → пересчёт инстансов)",
-                'ms', params['iters'], entities: params['add_faces'], ops: params['add_faces'] * 2,
-                params: { 'add_faces' => params['add_faces'], 'effect' => 'все инстансы определения пересчитываются' }) do |_i|
-          faces = []
-          params['add_faces'].times do |k|
-            x = 5000 + k * 120
-            faces << defn.entities.add_face([x, 0, 0], [x + 100, 0, 0],
-                                            [x + 100, 100, 0], [x, 100, 0])
-          end
-          defn.entities.erase_entities(faces)
-        end
-      end
-
       # -- сцена grid: API-06 + легаси-тесты + zoom ---------------------------------------
 
       def tests_grid(model, params)
@@ -1339,7 +1241,7 @@ module Dn1supBenchmark
       # -- контекст и утилиты ---------------------------------------------------------------
 
       def scene_title(name)
-        { 'basics' => 'базовые API', 'nested' => 'вложенные группы', 'components' => 'компоненты',
+        { 'basics' => 'базовые API', 'nested' => 'вложенные группы',
           'grid' => 'плотная сетка', 'textured' => 'текстурированные боксы' }.fetch(name, name)
       end
 
@@ -1347,7 +1249,6 @@ module Dn1supBenchmark
         p = @state['params']
         case name
         when 'nested' then { 'depth' => p['nested']['depth'], 'items' => p['nested']['items'] }
-        when 'components' then p['components'].merge('targets' => p['targets'])
         when 'grid' then { 'n' => p['grid']['n'], 'expected_edges' => 2 * p['grid']['n'] * (p['grid']['n'] + 1) }
         when 'textured' then { 'boxes' => p['textured']['boxes'] }
         else {}

@@ -2,10 +2,10 @@
   "score_version": "1",
   "profile": "small",
   "reference": {
-    "description": "Базовая точка отсчёта общего балла: фактический прогон bench-SU27__small__20261028-110829 (2026-10-28). Это НЕ эталонное железо — просто фиксированная шкала: 1000 баллов = эта конфигурация.",
+    "description": "Базовая точка отсчёта общего балла: фактический прогон bench-SU27__small__20261028-110829 (2026-10-28). Это НЕ эталонное железо — просто фиксированная шкала: 1000 баллов = эта конфигурация. В suite v3 тест fps_components_static удалён (вес графики перенормируется).",
     "sketchup_version": "27.0.264",
     "ruby_version": "3.4.9",
-    "test_suite_version": "2",
+    "test_suite_version": "3",
     "source_run": "bench-SU27__small__20261028-110829"
   },
   "values": {
@@ -17,7 +17,6 @@
     "API-06": { "value": 154.1, "unit": "ms" },
     "DOC-01": { "value": 72.9, "unit": "ms" },
     "DOC-02": { "value": 246.0, "unit": "ms" },
-    "fps_components_static": { "value": 61.9, "unit": "fps" },
     "fps_grid_static": { "value": 59.6, "unit": "fps" },
     "fps_grid_orbit": { "value": 62.0, "unit": "fps" },
     "fps_grid_pan": { "value": 61.8, "unit": "fps" },

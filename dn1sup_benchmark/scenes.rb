@@ -40,59 +40,6 @@ module Dn1supBenchmark
       { 'path' => path, 'entities' => count, 'depth' => depth }
     end
 
-    # --- components: лес определений/сборок/инстансов --------------------------
-    # defs листовых определений (боксы по 12 граней), assemblies сборок
-    # (каждая = per_assembly инстансов листовых), сверху сетка grid×grid
-    # инстансов сборок. Возвращает счётчики для traverse/тестов.
-    #
-    # Построение разложено на пофазные хелперы — их же использует кусочный
-    # движок Runner (тяжёлые сцены не должны блокировать UI-поток надолго).
-    def build_components(model, defs_n, assemblies_n, per_assembly, grid_n)
-      leaf_defs = components_leaf_defs(model, 0, defs_n, defs_n)
-      asm_defs = components_asm_defs(model, leaf_defs, 0, assemblies_n, assemblies_n, per_assembly, defs_n)
-      components_top(model, asm_defs, 0, grid_n * grid_n, grid_n, assemblies_n)
-      top = grid_n * grid_n
-      { 'entities' => top + assemblies_n * per_assembly,
-        'top_instances' => top,
-        'leaf_defs' => defs_n, 'asm_defs' => assemblies_n,
-        'total_instances' => top + assemblies_n * per_assembly }
-    end
-
-    # Фаза 1: листовые определения [from, to).
-    def components_leaf_defs(model, from, to, defs_n)
-      from.upto(to - 1).map do |i|
-        defn = model.definitions.add("dn1_leaf_#{i}")
-        w = 80 + (i % 5) * 30
-        h = 60 + ((i * 7) % 4) * 25
-        face = defn.entities.add_face([0, 0, 0], [w, 0, 0], [w, w, 0], [0, w, 0])
-        face.pushpull(h)
-        defn
-      end
-    end
-
-    # Фаза 2: определения сборок [from, to).
-    def components_asm_defs(model, leaf_defs, from, to, assemblies_n, per_assembly, defs_n)
-      from.upto(to - 1).map do |a|
-        defn = model.definitions.add("dn1_asm_#{a}")
-        per_assembly.times do |k|
-          tr = Geom::Transformation.new([((k % 3) * 250), (((k / 3) % 3) * 250), 0])
-          defn.entities.add_instance(leaf_defs[(a * per_assembly + k) % defs_n], tr)
-        end
-        defn
-      end
-    end
-
-    # Фаза 3: верхние инстансы [from, to) (общее = grid_n²).
-    def components_top(model, asm_defs, from, to, grid_n, assemblies_n)
-      step = 900
-      from.upto(to - 1).each do |k|
-        r = k / grid_n
-        c = k % grid_n
-        tr = Geom::Transformation.new([c * step, r * step, 0])
-        model.entities.add_instance(asm_defs[k % assemblies_n], tr)
-      end
-    end
-
     # --- grid: плотная сетка смежных квадратов n×n ------------------------------
     def build_grid(model, n)
       n.times { |i| grid_row(model, n, i) }
@@ -133,5 +80,8 @@ module Dn1supBenchmark
     # Генератор страниц (build_pages) удалён: автоматическое переключение
     # страниц внутри undo-операции небезопасно (инцидент 2026-10-28, SU2027) —
     # см. fps_tool.rb и README.
+    # Сцена components (build_components и пофазные хелперы) удалена (suite
+    # v3): на SU2027 вьюпорт зависает на простое после построения сцены
+    # ~80 000 вложенных инстансов — см. CHANGELOG 0.4.0 и runner.rb.
   end
 end

@@ -11,7 +11,7 @@ module Dn1supBenchmark::Test
 
   test 'dialog: plan_data отдаёт шаги и категории' do
     data = D.send(:plan_data, 'small', nil)
-    assert(data['steps'].size >= 14, 'полный план шагов')
+    assert(data['steps'].size >= 12, 'полный план шагов (suite v3: 13 шагов)')
     assert(data['categories'].is_a?(Array) && !data['categories'].empty?, 'категории для фильтра')
     assert(data['params'].is_a?(Hash), 'параметры профиля')
   end

@@ -32,15 +32,17 @@ module Dn1supBenchmark
       'graphics' => 0.30
     }.freeze
 
-    # Тесты, входящие в балл (канонический набор ТЗ; scene_gen_* и легаси-
+    # Тесты, входящие в балл (канонический набор; scene_gen_* и легаси-
     # дубли не участвуют, чтобы не учитывать одну работу дважды). API-04
     # исключён: субмиллисекундный тест (медиана 0.0–0.1 мс) даёт нестабильное
     # отношение к базе и делает балл «partial» на быстрых машинах.
+    # fps_components_static удалён из набора (suite v3): сцена компонентов
+    # вешала вьюпорт SU2027 (см. CHANGELOG 0.4.0).
     INCLUDED = {
       'ruby' => %w[RUBY-01],
       'api' => %w[API-01 API-02 API-03 API-05 API-06],
       'documents' => %w[DOC-01 DOC-02],
-      'graphics' => %w[fps_components_static fps_grid_static fps_grid_orbit
+      'graphics' => %w[fps_grid_static fps_grid_orbit
                        fps_grid_pan fps_grid_zoom fps_textured_static]
     }.freeze
 
