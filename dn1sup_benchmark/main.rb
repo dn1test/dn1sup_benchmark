@@ -36,6 +36,8 @@ require File.join(File.dirname(__FILE__), 'command.rb')
 module Dn1supBenchmark
   VERSION   = '0.4.0'.freeze
   PLUG_ROOT = File.dirname(__FILE__).freeze
+  TOOLBAR_NAME = 'DN1Sup Benchmark'.freeze
+  CMD_TOOLTIP  = 'DN1Sup Benchmark: панель'.freeze
 
   class << self
     # -- отслеживаемые ресурсы (снимаются в unload!) ---------------------------
@@ -101,6 +103,38 @@ module Dn1supBenchmark
       menu.add_item('Открыть папку отчётов')        { safe { open_reports_dir } }
       menu.add_separator
       menu.add_item('О расширении')                 { about }
+      setup_toolbar
+    end
+
+    # Панель инструментов с кнопкой запуска панели. Тулбар через API не
+    # удаляется, поэтому кнопка создаётся один раз: после горячей перезагрузки
+    # UI::Toolbar.new возвращает существующую панель, а блок старой кнопки
+    # ссылается на константу модуля, которая к этому моменту указывает уже на
+    # новый код (паттерн dn1sup-плагинов).
+    def setup_toolbar
+      return unless defined?(UI::Toolbar)
+
+      toolbar = UI::Toolbar.new(TOOLBAR_NAME)
+      return if toolbar.any? { |c| c.tooltip == CMD_TOOLTIP }
+
+      cmd = UI::Command.new('Панель бенчмарка') do
+        Dn1supBenchmark.show_panel if defined?(Dn1supBenchmark)
+      end
+      cmd.menu_text = 'Панель бенчмарка…'
+      cmd.tooltip = CMD_TOOLTIP
+      cmd.status_bar_text = 'Открыть панель бенчмарка'
+      svg = File.join(PLUG_ROOT, 'icons', 'bench.svg')
+      if File.exist?(svg) && defined?(Sketchup) && Sketchup.respond_to?(:version) && Sketchup.version.to_i >= 16
+        cmd.small_icon = svg
+        cmd.large_icon = svg
+      else
+        cmd.small_icon = File.join(PLUG_ROOT, 'icons', 'bench_16.png')
+        cmd.large_icon = File.join(PLUG_ROOT, 'icons', 'bench_24.png')
+      end
+      toolbar.add_item(cmd)
+      toolbar.restore
+    rescue StandardError => e
+      puts "[dn1sup_benchmark] Не удалось создать панель инструментов: #{e.message}"
     end
 
     # Общий DN1Sup-подменю, если какой-то dn1sup-плагин его уже создал;
