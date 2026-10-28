@@ -193,4 +193,30 @@ module Dn1supBenchmark::Test
   ensure
     R.instance_variable_set(:@scene_state, nil)
   end
+
+  test 'кусковой движок вне прогона: «хвост» @run_model не мешает' do
+    # Регрессия 0.3.2: после аварийного стопа @run_model оставался и guard
+    # модели ломал любые тики вне прогона (в том числе юнит-тесты).
+    R.instance_variable_set(:@run_model, :stale_object)
+    task = R.make_task(
+      [{ 'timed' => false, 'total' => 3, 'batch' => 3,
+         'work' => ->(_f, _t, ctx) { ctx['done'] = true } }],
+      ->(_t, _p, ctx) { ctx['finished'] = true }
+    )
+    assert_equal(:done, R.task_drain(task))
+    assert(task['ctx']['done'] && task['ctx']['finished'], 'работа и on_finish выполнены')
+  ensure
+    R.instance_variable_set(:@run_model, nil)
+  end
+
+  test 'abort_run! сбрасывает состояние прогона' do
+    R.instance_variable_set(:@state, { 'results' => [] })
+    R.instance_variable_set(:@run_model, :stale)
+    R.instance_variable_set(:@baseline_entities, 5)
+    R.abort_run!
+    assert_nil(R.run_data)
+    assert_nil(R.instance_variable_get(:@run_model))
+    assert_nil(R.instance_variable_get(:@baseline_entities))
+    refute(R.cancelled?)
+  end
 end

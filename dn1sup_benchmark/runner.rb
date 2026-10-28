@@ -265,12 +265,24 @@ module Dn1supBenchmark
       end
 
       # Защита: каждый шаг и каждая очистка обязаны работать с той моделью,
-      # на которой прогон был начат. Иначе — аварийный стоп без очистки.
+      # на которой прогон был начат. Вне активного прогона guard не действует
+      # (иначе «хвост» @run_model ломал бы всё после аварийного стопа).
       def guard_model!
-        return if @run_model.nil?
+        return if @state.nil? || @run_model.nil?
         return if Sketchup.active_model.equal?(@run_model)
 
         raise ModelChanged
+      end
+
+      # Полный сброс состояния прогона (аварийные пути: смена модели и т.п.).
+      def abort_run!
+        fps_stop_tool
+        @state = nil
+        @scene_state = nil
+        @run_model = nil
+        @baseline_entities = nil
+        @cancel_requested = false
+        nil
       end
 
       # -- кусковой движок (тяжёлая работа не блокирует UI надолго) ---------------
@@ -711,6 +723,9 @@ module Dn1supBenchmark
         data['score'] = Score.compute(data) # необязательный общий балл
         @last_run_data = data
         @state = nil
+        @scene_state = nil
+        @run_model = nil
+        @baseline_entities = nil
         @cancel_requested = false
         paths = Report.save_run(data)
         Dn1supBenchmark.last_report = paths['html']
