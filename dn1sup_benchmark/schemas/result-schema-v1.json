@@ -1,0 +1,142 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/dn1test/dn1sup_benchmark/schemas/result-schema-v1.json",
+  "title": "dn1sup_benchmark run report (schema v1)",
+  "description": "Отчёт прогона бенчмарка dn1sup_benchmark 0.2.0+. Отсутствующие показатели — null (не нули).",
+  "type": "object",
+  "required": ["meta", "results"],
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": [
+        "schema_version", "benchmark_version", "test_suite_version",
+        "profile", "sketchup_version", "ruby_version", "platform", "started_at"
+      ],
+      "properties": {
+        "schema_version": { "const": 1 },
+        "benchmark_version": { "type": "string" },
+        "test_suite_version": { "type": "string" },
+        "extension_version": { "type": "string", "description": "легаси-ключ 0.1.0, равен benchmark_version" },
+        "profile": { "type": "string", "enum": ["small", "medium", "large", "custom"] },
+        "params": { "type": "object", "description": "полный набор параметров профиля" },
+        "sketchup_version": { "type": "string" },
+        "version_number": { "type": "integer" },
+        "ruby_version": { "type": "string" },
+        "ruby_description": { "type": ["string", "null"] },
+        "platform": { "type": "string" },
+        "os": { "type": "string" },
+        "cpu": { "type": "string" },
+        "cores": { "type": "integer" },
+        "extensions_loaded": { "type": "integer" },
+        "started_at": { "type": "string" },
+        "environment": {
+          "type": "object",
+          "description": "параметры графики/окна; недоступное через API — null",
+          "properties": {
+            "ui_scale_factor": { "type": ["number", "null"] },
+            "viewport": {
+              "type": "object",
+              "description": "размер в логических пикселях; View#vpwidth возвращает Float",
+              "properties": {
+                "width": { "type": ["number", "null"] },
+                "height": { "type": ["number", "null"] }
+              }
+            },
+            "render_mode": { "type": ["integer", "null"] },
+            "face_style_mode": { "type": ["integer", "null"] },
+            "edge_display_mode": { "type": ["integer", "null"] },
+            "display_shadows": { "type": ["boolean", "null"] },
+            "graphics_engine": { "type": "null", "description": "нет источника через SketchUp Ruby API" }
+          }
+        },
+        "sources": {
+          "type": "object",
+          "description": "источник каждого класса показателей (встроенный API / внутренний замер / нет источника)"
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "required": ["profile", "status"],
+      "properties": {
+        "profile": { "type": "string" },
+        "status": { "type": "string", "enum": ["completed", "cancelled"] },
+        "started_at": { "type": "string" }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/test_result" }
+    },
+    "log": { "type": "array", "items": { "type": "string" } }
+  },
+  "definitions": {
+    "test_result": {
+      "type": "object",
+      "required": [
+        "id", "name", "group", "category", "test_version", "unit",
+        "higher_is_better", "status", "parameters", "repeat_count", "times_ms",
+        "validation"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "стабильный id теста (RUBY-01, API-01…06, DOC-01/02, scene_gen_*, fps_*, …)"
+        },
+        "name": { "type": "string" },
+        "group": {
+          "type": "string",
+          "enum": ["ruby", "api", "documents", "graphics", "scene_gen", "viewport", "hierarchy", "editing", "textures"],
+          "description": "категория (для новых тестов совпадает с category; легаси-значения — для отображения)"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["ruby", "api", "documents", "graphics", "scene_gen", "viewport", "hierarchy", "editing", "textures"]
+        },
+        "test_version": { "type": "string" },
+        "unit": { "type": ["string", "null"], "enum": ["ms", "fps", null] },
+        "higher_is_better": { "type": "boolean" },
+        "status": { "type": "string", "enum": ["passed", "failed", "cancelled", "skipped"] },
+        "parameters": {
+          "type": "object",
+          "description": "фиксированные параметры теста; участвуют в проверке совместимости сравнения"
+        },
+        "repeat_count": { "type": "integer", "minimum": 0 },
+        "times_ms": {
+          "type": "array",
+          "items": { "type": "number" },
+          "description": "исходные длительности повторов (для fps — значения fps)"
+        },
+        "median_ms": { "type": ["number", "null"] },
+        "min_ms": { "type": ["number", "null"] },
+        "max_ms": { "type": ["number", "null"] },
+        "p95_ms": { "type": ["number", "null"], "description": "null при числе повторов < 10" },
+        "ops_per_sec": { "type": ["number", "null"] },
+        "entities": { "type": ["integer", "null"] },
+        "entities_created": { "type": ["integer", "null"] },
+        "file_size_bytes": { "type": ["integer", "null"] },
+        "validation": {
+          "type": "object",
+          "required": ["passed", "errors"],
+          "properties": {
+            "passed": { "type": "boolean" },
+            "errors": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "error": { "type": ["string", "null"] },
+        "diagnostics": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "class": { "type": "string" },
+              "message": { "type": "string" },
+              "backtrace": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        },
+        "value": { "type": ["number", "null"], "description": "итоговое значение = median (для fps — fps)" }
+      }
+    }
+  }
+}

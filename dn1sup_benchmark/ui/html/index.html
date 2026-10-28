@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <title>DN1Sup Benchmark</title>
+  <link href="../assets/modus-bootstrap.min.css" rel="stylesheet">
+  <style>
+    /* Точечные правки раскладки поверх Modus (не свой дизайн). */
+    body { overflow-x: hidden; }
+    .bench-tab-pane { padding-top: .75rem; }
+    .mono { font-family: Consolas, monospace; font-size: .85em; }
+    .num { text-align: right; white-space: nowrap; }
+    .progress-logs { max-height: 120px; overflow-y: auto; font-size: .8rem; }
+    table.bench-table td, table.bench-table th { font-size: .82rem; padding: .25rem .5rem; }
+    .badge-status-passed { background-color: #0e7c86; }
+    .badge-status-failed { background-color: #da3b01; }
+    .badge-status-cancelled, .badge-status-skipped { background-color: #6a6e79; }
+  </style>
+</head>
+<body class="p-2">
+  <div class="d-flex align-items-center mb-2">
+    <span class="h6 me-auto mb-0">DN1Sup Benchmark <span class="text-secondary small" id="ver"></span></span>
+    <span class="badge badge-status-passed d-none" id="run-badge">прогон идёт</span>
+  </div>
+
+  <ul class="nav nav-tabs" id="tabs">
+    <li class="nav-item"><a class="nav-link active" data-tab="tab-overview" href="#">Обзор</a></li>
+    <li class="nav-item"><a class="nav-link" data-tab="tab-tests" href="#">Тесты</a></li>
+    <li class="nav-item"><a class="nav-link" data-tab="tab-run" href="#">Запуск</a></li>
+    <li class="nav-item"><a class="nav-link" data-tab="tab-results" href="#">Результаты</a></li>
+    <li class="nav-item"><a class="nav-link" data-tab="tab-compare" href="#">Сравнение</a></li>
+    <li class="nav-item"><a class="nav-link" data-tab="tab-settings" href="#">Настройки</a></li>
+  </ul>
+
+  <div id="notice" class="alert alert-info py-2 px-3 my-2 d-none small"></div>
+
+  <!-- ================= Обзор ================= -->
+  <div class="bench-tab-pane" id="tab-overview">
+    <div class="row g-3">
+      <div class="col-6">
+        <div class="card"><div class="card-body">
+          <h6 class="card-title">Среда</h6>
+          <table class="table table-sm mb-0" id="env-table"></table>
+          <div class="text-secondary small mt-1">GPU-движок и счётчики CPU/GPU/VRAM через API недоступны — не измеряются (null), а не 0.</div>
+        </div></div>
+      </div>
+      <div class="col-6">
+        <div class="card"><div class="card-body">
+          <h6 class="card-title">Последний прогон</h6>
+          <div id="last-run" class="small">—</div>
+          <div class="mt-2 d-flex gap-2">
+            <button class="btn btn-outline-primary btn-sm" onclick="bench.openReports()">Папка отчётов</button>
+            <button class="btn btn-outline-primary btn-sm" onclick="bench.refreshOverview()">Обновить</button>
+          </div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Тесты ================= -->
+  <div class="bench-tab-pane d-none" id="tab-tests">
+    <div class="row g-3">
+      <div class="col-4">
+        <label class="form-label small mb-1">Профиль нагрузки</label>
+        <select class="form-select form-select-sm" id="profile-select">
+          <option value="small">small — 10 тыс. рёбер / 100 инстансов</option>
+          <option value="medium">medium — 100 тыс. / 1 000</option>
+          <option value="large">large — 500 тыс. / 10 000 (тяжёлый)</option>
+          <option value="custom">custom — свои параметры</option>
+        </select>
+        <div id="custom-fields" class="d-none mt-2 small">
+          <div class="row g-1">
+            <div class="col-6"><label class="form-label mb-0">Сетка n×n</label><input class="form-control form-control-sm" id="cu-grid-n" value="70"></div>
+            <div class="col-6"><label class="form-label mb-0">Инстансов grid²</label><input class="form-control form-control-sm" id="cu-comp-grid" value="10"></div>
+            <div class="col-6"><label class="form-label mb-0">Контуров API-01</label><input class="form-control form-control-sm" id="cu-loops" value="2500"></div>
+            <div class="col-6"><label class="form-label mb-0">Определений API-03</label><input class="form-control form-control-sm" id="cu-defs" value="10"></div>
+            <div class="col-6"><label class="form-label mb-0">Боксов текстур</label><input class="form-control form-control-sm" id="cu-boxes" value="24"></div>
+            <div class="col-6"><label class="form-label mb-0">Граней в оп. API-06</label><input class="form-control form-control-sm" id="cu-tx" value="100"></div>
+          </div>
+          <div class="text-secondary mt-1">Остальные параметры берутся из профиля small.</div>
+        </div>
+        <div id="profile-warning" class="alert alert-warning py-1 px-2 mt-2 mb-0 small d-none"></div>
+        <button class="btn btn-primary btn-sm mt-2" onclick="bench.toRun()">К запуску →</button>
+      </div>
+      <div class="col-8">
+        <div class="card"><div class="card-body">
+          <h6 class="card-title">Нагрузка и план</h6>
+          <div id="plan-params" class="small mb-2"></div>
+          <table class="table table-sm bench-table mb-0" id="plan-steps"></table>
+        </div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ================= Запуск ================= -->
+  <div class="bench-tab-pane d-none" id="tab-run">
+    <div id="run-start-block">
+      <div class="alert alert-secondary small py-2 px-3">
+        Бенчмарк <b>временно создаёт и откатывает</b> геометрию в текущей модели. Сохраните модель,
+        закройте лишние вкладки и не переключайте модели до конца прогона. Файловые тесты (DOC)
+        открывают и закрывают контрольную модель во временной папке.
+        <div class="mt-1" id="run-load-summary"></div>
+      </div>
+      <button class="btn btn-primary" id="btn-start" onclick="bench.startRun()">Запустить</button>
+    </div>
+    <div id="run-progress-block" class="d-none">
+      <div class="d-flex align-items-center gap-2">
+        <div class="progress flex-grow-1" style="height: 18px;">
+          <div class="progress-bar" id="run-bar" style="width: 0%"></div>
+        </div>
+        <span class="small mono" id="run-counter">0/0</span>
+        <button class="btn btn-outline-danger btn-sm" onclick="bench.cancelRun()">Отменить</button>
+      </div>
+      <div class="small mt-2" id="run-current">—</div>
+      <div class="progress-logs mono text-secondary mt-1" id="run-log"></div>
+    </div>
+  </div>
+
+  <!-- ================= Результаты ================= -->
+  <div class="bench-tab-pane d-none" id="tab-results">
+    <div class="d-flex gap-2 mb-2">
+      <button class="btn btn-outline-primary btn-sm" onclick="bench.refreshResults()">Обновить</button>
+      <button class="btn btn-outline-primary btn-sm" onclick="bench.openLastReport()">HTML-отчёт</button>
+    </div>
+    <div id="results-body" class="small">Нет данных — запустите прогон.</div>
+  </div>
+
+  <!-- ================= Сравнение ================= -->
+  <div class="bench-tab-pane d-none" id="tab-compare">
+    <div class="small text-secondary mb-1">Сравнимы только прогоны с одинаковыми версией теста, единицами и параметрами нагрузки (несовместимые помечаются, проценты не считаются).</div>
+    <div class="d-flex gap-2 align-items-start">
+      <div class="flex-grow-1 border rounded p-2" id="runs-list" style="max-height: 160px; overflow-y: auto;">—</div>
+      <button class="btn btn-primary btn-sm" onclick="bench.compareSelected()">Сравнить выбранные (2+)</button>
+    </div>
+    <div id="compare-body" class="mt-2"></div>
+  </div>
+
+  <!-- ================= Настройки ================= -->
+  <div class="bench-tab-pane d-none" id="tab-settings">
+    <div class="card" style="max-width: 480px;"><div class="card-body">
+      <label class="form-label small mb-0">Профиль по умолчанию</label>
+      <select class="form-select form-select-sm mb-2" id="st-profile">
+        <option value="small">small</option><option value="medium">medium</option>
+        <option value="large">large</option><option value="custom">custom</option>
+      </select>
+      <label class="form-label small mb-0">Повторов на тест (пусто = по профилю)</label>
+      <input class="form-control form-control-sm mb-2" id="st-iters" placeholder="напр. 3">
+      <label class="form-label small mb-0">Секунд на FPS-замер (пусто = по профилю)</label>
+      <input class="form-control form-control-sm mb-2" id="st-fps" placeholder="напр. 2.0">
+      <div class="form-check mb-2">
+        <input class="form-check-input" type="checkbox" id="st-doc" checked>
+        <label class="form-check-label small" for="st-doc">Файловые тесты DOC-01/02 (открывают контрольную модель во вкладке)</label>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="bench.saveSettings()">Сохранить</button>
+    </div></div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>

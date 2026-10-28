@@ -1,15 +1,20 @@
 # frozen_string_literal: true
 # =============================================================================
-# dn1sup_benchmark/command.rb — программный вход для прогона (меню использует
-# секвенсор из main.rb; эти методы дергают шаги напрямую — их вызывают тесты
+# dn1sup_benchmark/command.rb — программный вход для прогона (меню и диалог
+# используют Sequencer; эти методы дергают шаги напрямую — их вызывают тесты
 # и внешний оркестратор через мост, шаг за шагом, с паузами на FPS).
 # =============================================================================
 
 module Dn1supBenchmark
   class << self
     # План шагов прогона (для внешнего оркестратора).
-    def benchmark_steps(profile = 'quick')
-      Runner.steps(profile)
+    def benchmark_steps(profile = 'small', overrides = nil)
+      Runner.steps(profile, overrides)
+    end
+
+    # Краткое описание плана и параметров профиля (без исполнения).
+    def benchmark_plan(profile = 'small', overrides = nil)
+      Runner.plan_preview(profile, overrides)
     end
 
     # Выполнить один шаг (кроме :fps — тем нужен внешний такт между perform
@@ -23,14 +28,29 @@ module Dn1supBenchmark
       Runner.fps_collect
     end
 
+    # Отмена текущего прогона (проверяется между шагами и повторами).
+    def benchmark_cancel
+      Runner.cancel!
+    end
+
     # Текущий стейт прогона (для диагностики; не для записи).
     def benchmark_state
       Runner.run_data
     end
 
+    # Данные последнего завершённого прогона (как в сохранённом JSON).
+    def benchmark_last_run
+      Runner.last_run_data
+    end
+
     # Сравнительный отчёт по путям к JSON прошлых прогонов.
     def benchmark_compare(json_paths)
       Report.compare(json_paths)
+    end
+
+    # Список сохранённых прогонов (для выбора в сравнении).
+    def benchmark_runs
+      Report.list_runs
     end
   end
 end

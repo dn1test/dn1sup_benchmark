@@ -9,12 +9,16 @@ require_relative 'test_helper'
 
 module Dn1supBenchmark::Test
   test 'версия расширения задана' do
-    assert_equal '0.1.0', Dn1supBenchmark::VERSION
+    assert_equal '0.2.0', Dn1supBenchmark::VERSION
   end
 
   test 'модуль отвечает на программные команды' do
     assert(Dn1supBenchmark.respond_to?(:benchmark_steps), 'нет benchmark_steps')
+    assert(Dn1supBenchmark.respond_to?(:benchmark_plan), 'нет benchmark_plan')
     assert(Dn1supBenchmark.respond_to?(:benchmark_perform), 'нет benchmark_perform')
+    assert(Dn1supBenchmark.respond_to?(:benchmark_cancel), 'нет benchmark_cancel')
+    assert(Dn1supBenchmark.respond_to?(:benchmark_last_run), 'нет benchmark_last_run')
+    assert(Dn1supBenchmark.respond_to?(:benchmark_runs), 'нет benchmark_runs')
     assert(Dn1supBenchmark.respond_to?(:unload!), 'нет unload! (нужен для ext_reload)')
   end
 

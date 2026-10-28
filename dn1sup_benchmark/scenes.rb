@@ -114,5 +114,9 @@ module Dn1supBenchmark
       end
       { 'entities' => count * 6, 'boxes' => count }
     end
+
+    # Генератор страниц (build_pages) удалён: автоматическое переключение
+    # страниц внутри undo-операции небезопасно (инцидент 2026-10-28, SU2027) —
+    # см. fps_tool.rb и README.
   end
 end

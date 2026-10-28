@@ -10,6 +10,7 @@
 # =============================================================================
 
 require 'zlib'
+require 'tmpdir'
 
 module Dn1supBenchmark
   module PngGen
@@ -44,10 +45,15 @@ module Dn1supBenchmark
       [data.bytesize].pack('N') + type.b + data + [Zlib.crc32(type.b + data)].pack('N')
     end
 
+    # Корневая временная папка бенчмарка (текстуры, DOC-фикстуры и пр.).
+    def self.temp_root
+      base = ENV['TEMP'] || ENV['TMP'] || Dir.tmpdir
+      mkdir_p(File.join(base, 'dn1sup_benchmark'))
+    end
+
     # Каталог кэша текстур бенчмарка (создаётся по требованию).
     def self.texture_dir
-      base = ENV['TEMP'] || ENV['TMP'] || Dir.tmpdir
-      dir = File.join(base, 'dn1sup_benchmark', 'textures')
+      dir = File.join(temp_root, 'textures')
       mkdir_p(dir)
       dir
     end

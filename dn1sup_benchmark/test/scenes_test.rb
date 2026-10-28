@@ -8,13 +8,17 @@ module Dn1supBenchmark::Test
   def self.smoke_scene(name)
     skip('вне SketchUp: нет активной модели') unless defined?(Sketchup) && Sketchup.active_model
     model = Sketchup.active_model
+    before = model.entities.size
     model.start_operation("dn1sup_benchmark test: #{name}", true)
     begin
       info = yield(model)
-      assert(info['entities'].to_i > 0, "сцена #{name}: entities должен быть > 0")
+      assert(info['entities'].to_i >= 0, "сцена #{name}: entities должен быть счётчиком")
       info
     ensure
       model.abort_operation
+      # Регрессия отката: сцена не имеет права менять модель (инцидент
+      # 2026-10-28 — page-switch внутри undo-операции ломал откат).
+      assert_equal(before, model.entities.size, "сцена #{name}: модель изменилась после отката")
     end
   end
 

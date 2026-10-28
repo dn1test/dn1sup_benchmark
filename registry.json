@@ -3,8 +3,8 @@
     "id": "dn1sup_benchmark",
     "name": "DN1Sup Benchmark",
     "author": "dn1desn",
-    "description": "Бенчмарк производительности SketchUp: FPS вьюпорта на сложных сценах, редактирование, навигация по иерархии, текстуры. Сравнительные отчёты между версиями SketchUp.",
+    "description": "Бенчмарк производительности SketchUp: чистый Ruby, API (геометрия, компоненты, атрибуты, транзакции), файловые операции, FPS вьюпорта. Профили small/medium/large, HTML-панель, сравнение прогонов.",
     "repo": "dn1test/dn1sup_benchmark",
-    "version": "0.1.0"
+    "version": "0.2.0"
   }
 ]

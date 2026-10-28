@@ -7,9 +7,10 @@
 #   • setup! защищён от повторного входа;
 #   • код не использует file_loaded?.
 #
-# Прогон из меню идёт через секвенсор на одноразовых UI.start_timer: между
-# шагами управление возвращается UI-потоку — вьюпорт перерисовывается, и
-# FPS-метр (Tool#draw + view.invalidate) считает честные кадры.
+# Прогон идёт через Sequencer (sequencer.rb) — неблокирующий секвенсор на
+# одноразовых UI.start_timer. Диалог (UI::HtmlDialog) грузится лениво при
+# первом обращении через меню — он открывается ТОЛЬКО действием пользователя
+# (открывать окна из консоли/моста запрещено правилами безопасности).
 # =============================================================================
 
 require 'sketchup.rb'
@@ -25,12 +26,14 @@ end
 require File.join(File.dirname(__FILE__), 'png_gen.rb')
 require File.join(File.dirname(__FILE__), 'scenes.rb')
 require File.join(File.dirname(__FILE__), 'fps_tool.rb')
+require File.join(File.dirname(__FILE__), 'environment.rb')
 require File.join(File.dirname(__FILE__), 'runner.rb')
 require File.join(File.dirname(__FILE__), 'report.rb')
+require File.join(File.dirname(__FILE__), 'sequencer.rb')
 require File.join(File.dirname(__FILE__), 'command.rb')
 
 module Dn1supBenchmark
-  VERSION   = '0.1.0'.freeze
+  VERSION   = '0.2.0'.freeze
   PLUG_ROOT = File.dirname(__FILE__).freeze
 
   class << self
@@ -67,7 +70,13 @@ module Dn1supBenchmark
         end
       end
       Runner.fps_stop_tool
-      @sequencer_timer = nil
+      if defined?(Dialog) && Dialog.respond_to?(:unload)
+        begin
+          Dialog.unload
+        rescue StandardError
+          nil
+        end
+      end
       true
     end
 
@@ -80,13 +89,17 @@ module Dn1supBenchmark
       @setup_done = true
       parent = common_menu
       menu = track_menu(parent, parent.add_submenu('Benchmark'))
-      menu.add_item('Прогнать бенчмарк (полный)…') { safe { run_benchmark('full') } }
-      menu.add_item('Быстрый прогон (quick)…')     { safe { run_benchmark('quick') } }
+      menu.add_item('Панель бенчмарка…')            { safe { show_panel } }
       menu.add_separator
-      menu.add_item('Открыть последний отчёт')     { safe { open_last_report } }
-      menu.add_item('Открыть папку отчётов')       { safe { open_reports_dir } }
+      menu.add_item('Прогнать (small)…')            { safe { run_benchmark('small') } }
+      menu.add_item('Прогнать (medium)…')           { safe { run_benchmark('medium') } }
+      menu.add_item('Прогнать (large)…')            { safe { run_benchmark('large') } }
+      menu.add_item('Отменить прогон')              { safe { Sequencer.cancel } }
       menu.add_separator
-      menu.add_item('О расширении')               { about }
+      menu.add_item('Открыть последний отчёт')      { safe { open_last_report } }
+      menu.add_item('Открыть папку отчётов')        { safe { open_reports_dir } }
+      menu.add_separator
+      menu.add_item('О расширении')                 { about }
     end
 
     # Общий DN1Sup-подменю, если какой-то dn1sup-плагин его уже создал;
@@ -99,10 +112,17 @@ module Dn1supBenchmark
       end
     end
 
+    # Диалог грузится лениво (отдельный файл, отдельный require) — открывается
+    # только явным действием пользователя, никогда из консоли/моста.
+    def show_panel
+      require File.join(PLUG_ROOT, 'dialog.rb')
+      Dialog.show
+    end
+
     def about
-      UI.messagebox("DN1Sup Benchmark v#{VERSION}\n\n" \
-                    "Бенчмарк производительности SketchUp: FPS вьюпорта на сложных " \
-                    "сценах, редактирование, навигация по иерархии, текстуры.\n\n" \
+      UI.messagebox("DN1Sup Benchmark v#{VERSION} (набор тестов v#{Runner::SUITE_VERSION})\n\n" \
+                    "Бенчмарк производительности SketchUp: чистый Ruby, API, файловые " \
+                    "операции, FPS вьюпорта. Отчёты и сравнение прогонов.\n\n" \
                     "Отчёты: #{Report.report_dir}")
     end
 
@@ -121,7 +141,14 @@ module Dn1supBenchmark
     end
 
     def latest_report
-      files = Dir.glob(File.join(Report.report_dir, 'bench-*.html')).sort_by(&:mtime)
+      pattern = File.join(Report.report_dir, 'bench-*.html').tr('\\', '/')
+      files = Dir.glob(pattern).sort_by { |f| File.mtime(f) }
+      files.last
+    end
+
+    def latest_json_report
+      pattern = File.join(Report.report_dir, 'bench-*.json').tr('\\', '/')
+      files = Dir.glob(pattern).sort_by { |f| File.mtime(f) }
       files.last
     end
 
@@ -132,57 +159,35 @@ module Dn1supBenchmark
       UI.messagebox("DN1Sup Benchmark: #{e.class}: #{e.message}")
     end
 
-    # -- секвенсор прогона (из меню) ----------------------------------------------
+    # -- запуск прогона из меню -----------------------------------------------
 
-    # Проходит шаги Runner.steps: :sync-шаги выполняются сразу, :fps — стартует
-    # метр и опрашивается повторяющимся таймером (0.4 с) до готовности.
-    def run_benchmark(profile)
-      steps = Runner.steps(profile).dup
-      puts "[dn1sup_benchmark] старт прогона #{profile} (#{steps.size} шагов)"
-      execute_steps(steps)
-    end
-
-    def execute_steps(steps)
-      step = steps.shift
-      if step.nil?
-        finish_menu_run
+    def run_benchmark(profile, overrides = nil)
+      if Sequencer.running?
+        UI.messagebox('Прогон уже идёт — сначала отмените или дождитесь завершения.')
         return
       end
-      puts "[dn1sup_benchmark] шаг: #{step['label'] || step['name']}"
-      if step['kind'] == 'fps'
-        Runner.perform(step)
-        poll_fps(steps)
-      else
-        Runner.perform(step)
-        UI.start_timer(0.05, false) { execute_steps(steps) }
+      model = Sketchup.active_model
+      if model.nil?
+        UI.messagebox('Нет активной модели — прогону нужна открытая модель.')
+        return
       end
-    rescue StandardError => e
-      UI.messagebox("Прогон прерван: #{e.class}: #{e.message}")
-      Runner.fps_stop_tool
-    end
+      # Согласие пользователя (ТЗ §14): бенчмарк временно создаёт и откатывает
+      # геометрию в ТЕКУЩЕЙ модели. Подтверждение обязательно перед каждым
+      # прогоном; тяжёлые профили предупреждают дополнительно.
+      preview = "Профиль: #{profile}\nМодель: #{model.title}\n" \
+                "Повторов на тест: #{Runner.profile_params(profile, overrides)['iters']}\n\n" \
+                'Бенчмарк временно создаёт и откатывает геометрию в текущей модели. ' \
+                'Сохраните модель и не переключайте вкладки до конца прогона.\n\nЗапустить?'
+      if UI.messagebox(preview, UI::MB_OKCANCEL) != UI::IDOK
+        return
+      end
+      warning = Runner.profile_warning(profile)
+      if warning && UI.messagebox("#{warning}\n\nЗапустить?", UI::MB_OKCANCEL) != UI::IDOK
+        return
+      end
 
-    def poll_fps(steps)
-      waited = 0.0
-      timer = UI.start_timer(0.4, true) do
-        waited += 0.4
-        if Runner.fps_ready? || waited > 30.0
-          UI.stop_timer(timer)
-          timers.delete(timer)
-          Runner.fps_collect
-          UI.start_timer(0.05, false) { execute_steps(steps) }
-        end
-      end
-      track_timer(timer)
-    end
-
-    def finish_menu_run
-      summary = Runner.finish_run
-      if summary.is_a?(Hash) && summary['status'] == 'ok'
-        UI.messagebox("Прогон завершён: тестов #{summary['tests']}, " \
-                      "ошибок #{summary['errors']}.\n\nОтчёт:\n#{summary['html']}")
-      end
-    rescue StandardError => e
-      UI.messagebox("Не удалось завершить прогон: #{e.class}: #{e.message}")
+      puts "[dn1sup_benchmark] старт прогона #{profile}"
+      Sequencer.start(profile, overrides)
     end
   end
 end
