@@ -81,9 +81,18 @@
     var lr = d.last_run;
     if (!lr) { $('last-run').textContent = 'Прогонов пока не было.'; return; }
     var runSt = (lr.run && lr.run.status) || '?';
+    var scoreHtml = '';
+    if (lr.score && lr.score.overall) {
+      scoreHtml = '<div class="my-1"><span class="h5 mb-0"><b>' + Math.round(lr.score.overall) +
+        '</b></span> <span class="text-secondary small">общий балл (' + esc(lr.score.status) +
+        '; 1000 = база)</span></div>';
+    } else if (lr.score && lr.score.reason) {
+      scoreHtml = '<div class="text-secondary small my-1">Балл: ' + esc(lr.score.reason) + '</div>';
+    }
     $('last-run').innerHTML =
       'SU ' + esc(lr.sketchup) + ', профиль ' + esc(lr.profile) + ' — ' + esc(runSt) +
       ' (' + esc(lr.file) + ')<br>Тестов: ' + lr.tests + ', не пройдено: ' + lr.not_passed +
+      scoreHtml +
       '<table class="table table-sm bench-table mt-1 mb-0">' +
       '<tr><th>Тест</th><th>Статус</th><th class="num">Значение</th></tr>' +
       lr.results.slice(0, 8).map(function (r) {
@@ -204,6 +213,21 @@
     var m = d.meta || {};
     var html = '<div class="mb-1">SU ' + esc(m.sketchup_version) + ' · ' + esc(m.profile) + ' · ' +
                esc((d.run && d.run.status) || '') + ' · ' + esc(m.started_at) + '</div>';
+    if (d.score) {
+      if (d.score.overall) {
+        html += '<div class="alert alert-secondary py-2 px-3 my-1 d-flex align-items-baseline gap-2">' +
+          '<span class="h4 mb-0"><b>' + Math.round(d.score.overall) + '</b></span>' +
+          '<span class="small">общий балл профиля ' + esc(d.score.profile) + ' (' + esc(d.score.status) +
+          '; 1000 = базовый прогон ' + esc(d.score.baseline) + '); необязательная сводка, ' +
+          'разг. оценки ниже — основная часть</span>';
+        if (d.score.missing && d.score.missing.length) {
+          html += '<span class="text-danger small">не учтены: ' + esc(d.score.missing.join(', ')) + '</span>';
+        }
+        html += '</div>';
+      } else if (d.score.reason) {
+        html += '<div class="text-secondary small my-1">Общий балл: ' + esc(d.score.reason) + '</div>';
+      }
+    }
     (d.groups || []).forEach(function (g) {
       html += '<div class="fw-bold mt-2">' + esc(g.title) + '</div>' +
         '<table class="table table-sm bench-table"><tr>' +
@@ -244,6 +268,28 @@
     (d.warnings || []).forEach(function (w) {
       html += '<div class="alert alert-warning py-1 px-2 small">' + esc(w) + '</div>';
     });
+    if (d.scores && d.scores.length) {
+      html += '<table class="table table-sm bench-table"><tr><th>Общий балл</th>';
+      d.columns.forEach(function (c) {
+        html += '<th class="num">' + esc(c.sketchup) + ' ' + esc(c.profile) + '</th>';
+      });
+      html += '</tr><tr><td class="small text-secondary">1000 = базовый прогон</td>';
+      d.scores.forEach(function (s, i) {
+        if (!s || s.overall === null || s.overall === undefined) {
+          html += '<td class="num text-secondary">' + esc((s && s.reason) || '—') + '</td>';
+          return;
+        }
+        var cell = '<b>' + Math.round(s.overall) + '</b>';
+        if (i > 0 && s.percent !== undefined) {
+          var cls = Math.abs(s.percent) < 3 ? 'text-secondary' : (s.percent > 0 ? 'text-success' : 'text-danger');
+          cell += ' <span class="' + cls + ' small">' + (s.percent >= 0 ? '+' : '') + s.percent + '%</span>';
+        } else if (i > 0 && s.incompatible) {
+          cell += ' <span class="text-secondary small" title="' + esc(s.incompatible) + '">несравнимо</span>';
+        }
+        html += '<td class="num' + (i === 0 ? ' table-active' : '') + '">' + cell + '</td>';
+      });
+      html += '</tr></table>';
+    }
     var groups = {};
     d.rows.forEach(function (r) { (groups[r.group] = groups[r.group] || []).push(r); });
     Object.keys(groups).forEach(function (g) {

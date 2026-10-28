@@ -5,6 +5,6 @@
     "author": "dn1desn",
     "description": "Бенчмарк производительности SketchUp: чистый Ruby, API (геометрия, компоненты, атрибуты, транзакции), файловые операции, FPS вьюпорта. Профили small/medium/large, HTML-панель, сравнение прогонов.",
     "repo": "dn1test/dn1sup_benchmark",
-    "version": "0.2.0"
+    "version": "0.3.0"
   }
 ]

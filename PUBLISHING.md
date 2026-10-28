@@ -11,9 +11,9 @@
 |---|---|
 | Имя `dn1sup_*` в аккаунте `dn1test` | ✅ `dn1test/dn1sup_benchmark` |
 | Не archived | ✅ |
-| `registry.json` в корне `main` | ✅ (id, name, description, version 0.2.0) |
+| `registry.json` в корне `main` | ✅ (id, name, description, version 0.3.0) |
 | Стабильные релизы с `.rbz` | ✅ `dist/…rbz` через CI (`ruby tools/pack.rb`) |
-| Теги `vMAJOR.MINOR.PATCH` | ✅ (workflow на `v*`; v0.1.0 — 2026-10-28, v0.2.0 — 2026-10-28) |
+| Теги `vMAJOR.MINOR.PATCH` | ✅ (workflow на `v*`; v0.1.0 и v0.2.0 — 2026-10-28, v0.3.0 — 2026-10-28) |
 | Регистратор `<id>.rb` + `ext.id` | ✅ `dn1sup_benchmark.rb` в корне |
 
 ## Сборка и проверки перед релизом

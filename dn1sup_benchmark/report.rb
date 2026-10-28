@@ -65,6 +65,22 @@ module Dn1supBenchmark
         raise 'нужно минимум 2 прогона' if datas.size < 2
 
         warnings = []
+        scores = datas.map { |d| d['score'] || Score.compute(d) }
+        score_cells = scores.each_with_index.map do |s, i|
+          next { 'overall' => nil, 'reason' => s.nil? ? 'нет балла' : s['reason'] } if s.nil? || s['overall'].nil?
+
+          cell = { 'overall' => s['overall'], 'status' => s['status'], 'missing' => s['missing'] }
+          if i.positive?
+            reason = score_compatibility(scores.first, s)
+            base_s = scores.first['overall']
+            if reason
+              cell['incompatible'] = reason
+            elsif base_s && base_s.positive?
+              cell['percent'] = ((s['overall'] / base_s - 1) * 100).round(1)
+            end
+          end
+          cell
+        end
         cols = datas.map do |d|
           { 'sketchup' => d.dig('meta', 'sketchup_version'),
             'profile' => d.dig('meta', 'profile'),
@@ -108,7 +124,8 @@ module Dn1supBenchmark
             'cells' => cells }
         end
 
-        { 'columns' => cols, 'rows' => rows, 'warnings' => warnings.uniq, 'base_index' => 0 }
+        { 'columns' => cols, 'rows' => rows, 'warnings' => warnings.uniq,
+          'base_index' => 0, 'scores' => score_cells }
       end
 
       # Список сохранённых прогонов (новые сверху) — для вкладки «Сравнение».
@@ -139,6 +156,7 @@ module Dn1supBenchmark
         b << "</head>\n<body>\n"
         b << "<h1>Бенчмарк производительности SketchUp</h1>\n"
         b << meta_table(meta)
+        b << score_section(data['score']) if data['score']
         groups.keys.each do |g|
           b << group_section(g, groups[g])
         end
@@ -179,6 +197,76 @@ module Dn1supBenchmark
           out << "<tr><th>#{esc(k)}</th><td>#{esc(v)}</td></tr>\n"
         end
         out << "</table>\n"
+        out
+      end
+
+      # Секция необязательного общего балла (Geekbench-стиль): формула и веса
+      # опубликованы, раздельные оценки остаются основным содержанием отчёта.
+      def score_section(score)
+        out = +"<h2>Общий балл</h2>\n"
+        out << "<table class=\"meta\">\n"
+        overall = score['overall']
+        status = score['status']
+        out << "<tr><th>Балл (#{esc(score['profile'])})</th><td>"
+        if overall
+          out << "<b style=\"font-size: 20px\">#{overall.round(0)}</b> " \
+                 "<span class=\"muted\">(#{status}; 1000 = базовый прогон #{esc(score['baseline'])})</span>"
+        else
+          out << "<span class=\"muted\">недоступен — #{esc(score['reason'])}</span>"
+        end
+        out << '</td></tr>'
+        (score['categories'] || {}).each do |cat, val|
+          w = (score['weights'] || {})[cat]
+          out << "<tr><th>#{esc(Runner::GROUP_TITLES.fetch(cat, cat))} " \
+                 "<span class=\"muted\">×#{w}</span></th><td>#{val ? val.round(0) : '—'}</td></tr>\n"
+        end
+        out << "</table>\n"
+        unless (score['missing'] || []).empty?
+          out << "<p class=\"muted\">Не учтены (partial): #{esc(score['missing'].join(', '))}</p>\n"
+        end
+        out << "<p class=\"muted\">Формула: балл теста = base/value (мс) или value/base (fps) " \
+               "к базовому прогону; категория — геометрическое среднее; общий — взвешенное " \
+               "геометрическое среднее категорий × 1000. Необязательная сводная оценка, " \
+               "НЕ официальный рейтинг SketchUp; сравним только между одинаковыми профилями. " \
+               "FPS-часть зависит от частоты обновления дисплея.</p>\n"
+        out
+      end
+
+      # Сравнимы ли общие баллы пары прогонов (одинаковые профиль и набор).
+      def score_compatibility(a, b)
+        return 'нет балла' if a.nil? || b.nil? || a['overall'].nil? || b['overall'].nil?
+        return 'профиль различается' if a['profile'] != b['profile']
+
+        nil
+      end
+
+      def html_compare_scores(datas)
+        scores = datas.map { |d| d['score'] || Score.compute(d) }
+        cols = datas.map { |d| "SU#{d['meta']['sketchup_version']} #{d['meta']['profile']}" }
+        out = +"<h2>Общие баллы</h2>\n<table class=\"bench compare\">\n<tr><th>Балл</th>"
+        cols.each { |c| out << "<th class=\"num\">#{esc(c)}</th>" }
+        out << "</tr>\n<tr><td>Общий балл (1000 = базовый прогон)</td>"
+        scores.each_with_index do |s, i|
+          if s.nil? || s['overall'].nil?
+            reason = s && s['reason'] ? " (#{esc(s['reason'])})" : ''
+            out << "<td class=\"num muted\">—#{reason}</td>"
+            next
+          end
+          cell = "<b>#{s['overall'].round(0)}</b>"
+          if i.positive?
+            reason = score_compatibility(scores.first, s)
+            base_s = scores.first && scores.first['overall']
+            if reason
+              cell << " <span class=\"muted\">#{esc(reason)}</span>"
+            elsif base_s && base_s.positive?
+              rel = (s['overall'] / base_s - 1) * 100
+              cls = rel.abs < 3 ? 'same' : (rel.positive? ? 'better' : 'worse')
+              cell << " <span class=\"#{cls}\">#{rel >= 0 ? '+' : ''}#{rel.round(1)}%</span>"
+            end
+          end
+          out << "<td class=\"num#{i.zero? ? ' base' : ''}\">#{cell}</td>"
+        end
+        out << "</tr>\n</table>\n"
         out
       end
 
@@ -272,6 +360,7 @@ module Dn1supBenchmark
              "(одинаковые версия теста, единицы и параметры нагрузки); " \
              "меньше мс — лучше, больше FPS — лучше.</p>\n"
         b << meta_table(base['meta'])
+        b << html_compare_scores(datas)
 
         warnings = []
         groups = {}

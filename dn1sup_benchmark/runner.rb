@@ -535,6 +535,7 @@ module Dn1supBenchmark
         fps_stop_tool
         close_scene
         data = run_data
+        data['score'] = Score.compute(data) # необязательный общий балл
         @last_run_data = data
         @state = nil
         @cancel_requested = false

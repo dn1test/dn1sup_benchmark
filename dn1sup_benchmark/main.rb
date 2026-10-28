@@ -27,13 +27,14 @@ require File.join(File.dirname(__FILE__), 'png_gen.rb')
 require File.join(File.dirname(__FILE__), 'scenes.rb')
 require File.join(File.dirname(__FILE__), 'fps_tool.rb')
 require File.join(File.dirname(__FILE__), 'environment.rb')
+require File.join(File.dirname(__FILE__), 'score.rb')
 require File.join(File.dirname(__FILE__), 'runner.rb')
 require File.join(File.dirname(__FILE__), 'report.rb')
 require File.join(File.dirname(__FILE__), 'sequencer.rb')
 require File.join(File.dirname(__FILE__), 'command.rb')
 
 module Dn1supBenchmark
-  VERSION   = '0.2.0'.freeze
+  VERSION   = '0.3.0'.freeze
   PLUG_ROOT = File.dirname(__FILE__).freeze
 
   class << self

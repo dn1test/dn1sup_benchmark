@@ -85,7 +85,8 @@ module Dn1supBenchmark
             'results' => (last['results'] || []).map do |r|
               { 'id' => r['id'], 'name' => r['name'], 'status' => r['status'],
                 'unit' => r['unit'], 'value' => r['value'] }
-            end
+            end,
+            'score' => last['score'] || Score.compute(last)
           },
           'reports_dir' => Report.report_dir,
           'running' => Sequencer.running?
@@ -212,6 +213,7 @@ module Dn1supBenchmark
           'meta' => data['meta'].slice('sketchup_version', 'profile', 'started_at',
                                        'test_suite_version', 'ruby_version', 'cpu'),
           'run' => data['run'],
+          'score' => data['score'] || Score.compute(data),
           'groups' => (data['results'] || []).group_by { |r| r['group'] }.map do |g, rs|
             { 'group' => g, 'title' => Runner::GROUP_TITLES.fetch(g, g),
               'tests' => rs.map do |r|
