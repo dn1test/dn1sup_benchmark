@@ -17,8 +17,11 @@ module Dn1supBenchmark
       Runner.plan_preview(profile, overrides)
     end
 
-    # Выполнить один шаг (кроме :fps — тем нужен внешний такт между perform
-    # и fps_collect, чтобы UI-поток отрисовал кадры).
+    # Выполнить один шаг. Шаг сцены может вернуть :in_progress — тяжёлая
+    # работа режется на порции ~1 с; вызывайте benchmark_perform(step) в
+    # цикле до результата-строки (пауза между вызовами отдаёт UI-поток).
+    # Для :fps нужен внешний такт между perform и fps_collect, чтобы
+    # UI-поток отрисовал кадры.
     def benchmark_perform(step)
       Runner.perform(step)
     end

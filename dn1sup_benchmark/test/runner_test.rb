@@ -139,4 +139,58 @@ module Dn1supBenchmark::Test
   test 'perform неизвестного шага не падает' do
     assert(R.perform({ 'kind' => 'zzz' }).is_a?(String))
   end
+
+  test 'кусковой движок: порции, фазы, суммы и on_finish' do
+    task = R.make_task(
+      [
+        { 'timed' => true, 'total' => 10, 'batch' => 3,
+          'work' => ->(from, to, ctx) { ((ctx['a'] ||= []) << [from, to]) } },
+        { 'timed' => false, 'total' => 4, 'batch' => 2,
+          'work' => ->(from, to, ctx) { ((ctx['b'] ||= []) << [from, to]) } }
+      ],
+      ->(times, phs, ctx) {
+        ctx['out'] = [times.size, phs[0]['sums'].to_f.positive?, phs[1]['sums'].nil?, ctx['a'].size]
+      }
+    )
+    assert_equal :in_progress, R.task_tick(task), 'первый тик — работа не закончена'
+    assert_equal([0, 3], task['ctx']['a'].first, 'первая порция [0,3)')
+    R.task_drain(task)
+    pairs = task['ctx']['a']
+    assert_equal(0, pairs.first[0], 'начало с нуля')
+    assert_equal(10, pairs.last[1], 'покрытие до 10')
+    assert(pairs.each_cons(2).all? { |x, y| x[1] == y[0] }, 'порции стыкуются без пропусков')
+    assert_equal([[0, 2], [2, 4]], task['ctx']['b'], 'нетаймированная фаза целиком')
+    out = task['ctx']['out']
+    assert(out[0] >= 1, 'таймированные куски посчитаны')
+    assert(out[1], 'суммы таймированной фазы накоплены')
+    assert(out[2], 'у нетаймированной фазы сумм нет')
+    assert_equal(pairs.size, out[3], 'все порции дошли до on_finish')
+  end
+
+  test 'кусковой движок: отмена прерывает тик' do
+    task = R.make_task(
+      [{ 'timed' => false, 'total' => 100, 'batch' => 1,
+         'work' => ->(_f, _t, _c) { nil } }],
+      ->(_t, _p, _c) { nil }
+    )
+    R.cancel!
+    assert_raises(Dn1supBenchmark::Runner::Cancelled) { R.task_tick(task) }
+    R.instance_variable_set(:@cancel_requested, false)
+  end
+
+  test 'кусковой движок: progress отдаёт done/total' do
+    task = R.make_task(
+      [{ 'timed' => false, 'total' => 10, 'batch' => 4,
+         'work' => ->(_f, _t, _c) { nil } }],
+      ->(_t, _p, _c) { nil }
+    )
+    R.instance_variable_set(:@scene_state, { 'task' => task })
+    R.task_tick(task)
+    pr = R.task_progress
+    assert_equal(4, pr['done'])
+    assert_equal(10, pr['total'])
+    assert_equal(1, pr['phase'])
+  ensure
+    R.instance_variable_set(:@scene_state, nil)
+  end
 end

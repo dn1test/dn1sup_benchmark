@@ -33,10 +33,12 @@ module Dn1supBenchmark
     }.freeze
 
     # Тесты, входящие в балл (канонический набор ТЗ; scene_gen_* и легаси-
-    # дубли не участвуют, чтобы не учитывать одну работу дважды).
+    # дубли не участвуют, чтобы не учитывать одну работу дважды). API-04
+    # исключён: субмиллисекундный тест (медиана 0.0–0.1 мс) даёт нестабильное
+    # отношение к базе и делает балл «partial» на быстрых машинах.
     INCLUDED = {
       'ruby' => %w[RUBY-01],
-      'api' => %w[API-01 API-02 API-03 API-04 API-05 API-06],
+      'api' => %w[API-01 API-02 API-03 API-05 API-06],
       'documents' => %w[DOC-01 DOC-02],
       'graphics' => %w[fps_components_static fps_grid_static fps_grid_orbit
                        fps_grid_pan fps_grid_zoom fps_textured_static]

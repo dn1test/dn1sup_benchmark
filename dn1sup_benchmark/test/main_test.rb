@@ -9,7 +9,7 @@ require_relative 'test_helper'
 
 module Dn1supBenchmark::Test
   test 'версия расширения задана' do
-    assert_equal '0.3.0', Dn1supBenchmark::VERSION
+    assert_equal '0.3.1', Dn1supBenchmark::VERSION
   end
 
   test 'модуль отвечает на программные команды' do

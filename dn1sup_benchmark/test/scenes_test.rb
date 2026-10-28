@@ -52,6 +52,19 @@ module Dn1supBenchmark::Test
     assert_equal(30, info['entities'], '5 боксов × 6 граней')
   end
 
+  test 'grid_row: одна строка даёт n граней' do
+    skip('вне SketchUp: нет активной модели') unless defined?(Sketchup) && Sketchup.active_model
+    model = Sketchup.active_model
+    model.start_operation('dn1sup_benchmark test: grid_row', true)
+    begin
+      before = model.entities.grep(Sketchup::Face).size
+      Dn1supBenchmark::Scenes.grid_row(model, 5, 2)
+      assert_equal(5, model.entities.grep(Sketchup::Face).size - before, '5 граней в строке')
+    ensure
+      model.abort_operation
+    end
+  end
+
   test 'сцены детерминированы: два построения дают одно число сущностей' do
     skip('вне SketchUp: нет активной модели') unless defined?(Sketchup) && Sketchup.active_model
     model = Sketchup.active_model

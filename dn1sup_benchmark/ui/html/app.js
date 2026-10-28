@@ -185,6 +185,11 @@
       case 'fps_tick':
         $('run-current').textContent = ev.label + ' — замер кадров… (' + ev.waited_s + ' с)';
         break;
+      case 'chunk':
+        $('run-current').textContent = ev.label + ' — ' + (ev.done || 0) + ' из ' +
+          (ev.total || 0) + (ev.phases ? ' (фаза ' + ev.phase + '/' + ev.phases + ')' : '') +
+          ' — можно отменить в любой момент';
+        break;
       case 'step_done':
         $('run-counter').textContent = ev.index + '/' + ev.total;
         $('run-bar').style.width = Math.round((ev.index / ev.total) * 100) + '%';

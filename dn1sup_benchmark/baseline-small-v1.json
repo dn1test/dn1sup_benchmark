@@ -13,7 +13,6 @@
     "API-01": { "value": 1992.7, "unit": "ms" },
     "API-02": { "value": 12.6, "unit": "ms" },
     "API-03": { "value": 3.7, "unit": "ms" },
-    "API-04": { "value": 0.1, "unit": "ms" },
     "API-05": { "value": 11.8, "unit": "ms" },
     "API-06": { "value": 154.1, "unit": "ms" },
     "DOC-01": { "value": 72.9, "unit": "ms" },

@@ -65,6 +65,17 @@ module Dn1supBenchmark
           emit('finish', summary.is_a?(Hash) ? summary : { 'status' => 'no_run' })
         else
           result = Runner.perform(step)
+          if result == :in_progress
+            # Кусочная работа (тяжёлые сцены/тесты): переставляем шаг в
+            # начало очереди — UI-поток между порциями остаётся свободным,
+            # панель получает события прогресса, отмена срабатывает мгновенно.
+            pr = Runner.task_progress
+            emit('chunk', 'label' => @last_label, 'done' => pr['done'],
+                 'total' => pr['total'], 'phase' => pr['phase'], 'phases' => pr['phases'])
+            steps.unshift(step)
+            UI.start_timer(0.001, false) { execute(steps) }
+            return
+          end
           @done += 1
           emit('step_done', 'label' => @last_label, 'index' => @done, 'total' => @total, 'result' => result.to_s)
           UI.start_timer(0.05, false) { execute(steps) }

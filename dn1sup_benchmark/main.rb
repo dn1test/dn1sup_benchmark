@@ -34,7 +34,7 @@ require File.join(File.dirname(__FILE__), 'sequencer.rb')
 require File.join(File.dirname(__FILE__), 'command.rb')
 
 module Dn1supBenchmark
-  VERSION   = '0.3.0'.freeze
+  VERSION   = '0.3.1'.freeze
   PLUG_ROOT = File.dirname(__FILE__).freeze
 
   class << self

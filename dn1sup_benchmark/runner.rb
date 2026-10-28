@@ -107,7 +107,11 @@ module Dn1supBenchmark
         'components' => { 'defs' => 32, 'assemblies' => 12, 'per_assembly' => 8, 'grid' => 100 },
         'nested' => { 'depth' => 6, 'items' => 12 },
         'textured' => { 'boxes' => 240 },
-        'api01_loops' => 125_000,
+        # Цель «500 тыс. рёбер» обеспечивает сцена grid (500×500 ≈ 501 тыс.
+        # рёбер). API-01 ограничен: 125 тыс. контуров в одной коллекции
+        # деградируют по скорости на порядки (замерено 2026-10-28, SU2027 —
+        # часы работы), повторяя нагрузку grid без новой информации.
+        'api01_loops' => 25_000,
         # api02 ограничен 1000 групп на всех тяжёлых профилях — сами по себе
         # группы дорогие, цель профиля отражают api01/api03 (зафиксировано).
         'api02_groups' => 1_000,
@@ -269,48 +273,215 @@ module Dn1supBenchmark
         raise ModelChanged
       end
 
+      # -- кусковой движок (тяжёлая работа не блокирует UI надолго) ---------------
+      #
+      # Задача = последовательность ФАЗ; фаза = единицы работы [from, to),
+      # выполняемые порциями ~CHUNK_TARGET_S секунд за тик. Между тиками
+      # UI-поток свободен: работает отмена, клики, панель получает прогресс.
+      # Тайминг — только длительности порций (простои между тиками не считаются),
+      # поэтому методика замера не меняется. Фаза:
+      #   'timed'    — копить ли длительности порций в task['times'];
+      #   'total'    — число единиц;
+      #   'batch'    — стартовый размер порции (далее адаптируется);
+      #   'work'     — ->(from, to, ctx) { };
+      #   'on_done'  — ->(ctx) { } после фазы (вне тайминга);
+      #   'on_finish'= ->(times, phases) { } после последней фазы.
+
+      CHUNK_TARGET_S = 1.0
+
+      def task_tick(task)
+        guard_model!
+        raise Cancelled if cancelled?
+
+        ph = task['phases'][task['pi']]
+        if task['batch'].nil?
+          task['batch'] = [ph['batch'] || ph['total'], ph['total']].min
+          task['done'] = 0
+        end
+        from = task['done']
+        to = [from + task['batch'], ph['total']].min
+        t0 = Dn1supBenchmark.monotonic
+        ph['work'].call(from, to, task['ctx'])
+        dt = Dn1supBenchmark.monotonic - t0
+        task['times'] << dt if ph['timed']
+        ph['sums'] = ph['sums'].to_f + dt if ph['timed']
+        task['done'] = to
+        if dt.positive? && to < ph['total']
+          nb = (task['batch'] * (CHUNK_TARGET_S / dt)).round
+          task['batch'] = nb.clamp(1, ph['total'])
+        end
+        if task['done'] >= ph['total']
+          ph['on_done']&.call(task['ctx'])
+          task['pi'] += 1
+          task['done'] = 0
+          task['batch'] = nil
+          if task['pi'] >= task['phases'].size
+            task['on_finish'].call(task['times'], task['phases'], task['ctx'])
+            return :done
+          end
+        end
+        :in_progress
+      end
+
+      # Синхронное выполнение задачи (тесты/мост): крутит тики до конца.
+      def task_drain(task)
+        loop { return :done if task_tick(task) == :done }
+      end
+
+      # Прогресс текущей кусочной работы (для событий панели).
+      def task_progress
+        st = @scene_state
+        return { 'done' => 0, 'total' => 0 } if st.nil? || st['task'].nil?
+
+        t = st['task']
+        ph = t['phases'][t['pi']] || {}
+        { 'done' => t['done'], 'total' => ph['total'].to_i,
+          'phase' => t['pi'] + 1, 'phases' => t['phases'].size }
+      end
+
+      def make_task(phases, on_finish)
+        { 'phases' => phases, 'pi' => 0, 'done' => 0, 'batch' => nil,
+          'ctx' => {}, 'times' => [], 'on_finish' => on_finish }
+      end
+
       def open_scene(name)
         guard_model!
-        close_scene
-        model = Sketchup.active_model
-        raise 'нет активной модели' if model.nil?
+        st = @scene_state
+        if st.nil?
+          close_scene
+          model = Sketchup.active_model
+          raise 'нет активной модели' if model.nil?
 
-        model.start_operation("DN1Sup Benchmark: #{name}", true)
-        @state['scene'] = name
-        info = nil
-        t0 = Dn1supBenchmark.monotonic
-        case name
-        when 'basics'
-          info = { 'entities' => 0 } # геометрию создают сами тесты
-        when 'nested'
-          p = @state['params']['nested']
-          info = Scenes.build_nested(model, p['depth'], p['items'])
-        when 'components'
-          p = @state['params']['components']
-          info = Scenes.build_components(model, p['defs'], p['assemblies'],
-                                         p['per_assembly'], p['grid'])
-        when 'grid'
-          p = @state['params']['grid']
-          info = Scenes.build_grid(model, p['n'])
-        when 'textured'
-          p = @state['params']['textured']
-          info = Scenes.build_textured(model, p['boxes'])
-        else
-          raise ArgumentError, "неизвестная сцена: #{name}"
+          model.start_operation("DN1Sup Benchmark: #{name}", true)
+          @state['scene'] = name
+          @scene_state = { 'name' => name, 'jobs' => [], 'result' => nil }
+          scene_plan(name, model)
         end
-        dt = Dn1supBenchmark.monotonic - t0
+        scene_tick
+      end
+
+      # Очередь работ сцены: [:sync, callable] — мгновенная работа,
+      # [:task, task] — кусочная (см. task_tick). Тик возвращает :in_progress,
+      # пока у сцены есть работа — UI-поток между тиками свободен.
+      def scene_tick
+        st = @scene_state
+        loop do
+          if st['task']
+            return :in_progress if task_tick(st['task']) == :in_progress
+
+            st['task'] = nil # задача завершена — берём следующую работу
+          end
+          job = st['jobs'].shift
+          if job.nil?
+            GC.start
+            @scene_state = nil
+            return st['result']
+          end
+          if job[0] == :sync
+            job[1].call
+          else
+            st['task'] = job[1]
+            return :in_progress if task_tick(st['task']) == :in_progress
+
+            st['task'] = nil
+          end
+        end
+      end
+
+      def record_scene_gen(name, dt, info)
         @state['scene_info'] = info
         GC.start
-
         if info['entities'].to_i.positive?
           add_result('api', "scene_gen_#{name}", "Построение: #{scene_title(name)}",
                      'ms', [dt], entities: info['entities'],
                      params: scene_params(name))
         end
         log_line("сцена #{name}: #{(dt * 1000).round} мс, entities=#{info['entities']}")
+      end
 
-        send("tests_#{name}", model, @state['params'])
-        "ok: #{name} за #{(dt * 1000).round} мс (entities=#{info['entities']})"
+      # План работ сцены: построение (кусками для тяжёлых сцен) + тесты.
+      def scene_plan(name, model)
+        st = @scene_state
+        p = @state['params']
+        case name
+        when 'basics'
+          plan_basics(st, model, p)
+        when 'nested'
+          st['jobs'] << [:sync, -> {
+            t0 = Dn1supBenchmark.monotonic
+            info = Scenes.build_nested(model, p['nested']['depth'], p['nested']['items'])
+            record_scene_gen('nested', Dn1supBenchmark.monotonic - t0, info)
+            tests_nested(model, p)
+            st['result'] = "ok: nested (entities=#{info['entities']})"
+          }]
+        when 'components'
+          cp = p['components']
+          top = cp['grid'] * cp['grid']
+          total = top + cp['assemblies'] * cp['per_assembly']
+          build = make_task(
+            [
+              { 'timed' => true, 'total' => cp['defs'], 'batch' => cp['defs'],
+                'work' => ->(from, to, ctx) {
+                  (ctx['leaf'] ||= []).concat(Scenes.components_leaf_defs(model, from, to, cp['defs']))
+                } },
+              { 'timed' => true, 'total' => cp['assemblies'], 'batch' => cp['assemblies'],
+                'work' => ->(from, to, ctx) {
+                  (ctx['asm'] ||= []).concat(Scenes.components_asm_defs(model, ctx['leaf'], from, to,
+                                                                        cp['assemblies'], cp['per_assembly'], cp['defs']))
+                } },
+              { 'timed' => true, 'total' => top, 'batch' => [top, 512].min,
+                'work' => ->(from, to, ctx) {
+                  Scenes.components_top(model, ctx['asm'], from, to, cp['grid'], cp['assemblies'])
+                } }
+            ],
+            ->(_times, _ph, _ctx) {
+              info = { 'entities' => total, 'top_instances' => top,
+                       'leaf_defs' => cp['defs'], 'asm_defs' => cp['assemblies'],
+                       'total_instances' => total }
+              record_scene_gen('components', build['phases'].sum { |ph| ph['sums'].to_f }, info)
+            }
+          )
+          st['jobs'] << [:task, build]
+          st['jobs'] << [:sync, -> {
+            tests_components(model, p)
+            st['result'] = "ok: components (entities=#{total})"
+          }]
+        when 'grid'
+          n = p['grid']['n']
+          build = make_task(
+            [{ 'timed' => true, 'total' => n, 'batch' => [n, 8].min,
+               'work' => ->(from, to, _ctx) {
+                 from.upto(to - 1) { |i| Scenes.grid_row(model, n, i) }
+               } }],
+            ->(_times, _ph, _ctx) {
+              record_scene_gen('grid', build['phases'][0]['sums'].to_f,
+                               { 'entities' => n * n, 'n' => n, 'faces' => n * n })
+            }
+          )
+          st['jobs'] << [:task, build]
+          st['jobs'] << [:sync, -> { tests_grid(model, p) }]
+          st['jobs'] << [:task, api06_task(model, p)]
+          st['jobs'] << [:sync, -> { st['result'] = "ok: grid (#{n * n} граней)" }]
+        when 'textured'
+          boxes = p['textured']['boxes']
+          build = make_task(
+            [{ 'timed' => true, 'total' => boxes, 'batch' => [boxes, 64].min,
+               'work' => ->(from, to, _ctx) {
+                 from.upto(to - 1) { |i| Scenes.textured_box(model, boxes, i) }
+               } }],
+            ->(_times, _ph, _ctx) {
+              record_scene_gen('textured', build['phases'][0]['sums'].to_f,
+                               { 'entities' => boxes * 6, 'boxes' => boxes })
+            }
+          )
+          st['jobs'] << [:task, build]
+          st['jobs'] << [:sync, -> {
+            tests_textured(model, p)
+            st['result'] = "ok: textured (#{boxes} боксов)"
+          }]
+        else
+          raise ArgumentError, "неизвестная сцена: #{name}"
+        end
       end
 
       def close_scene
@@ -323,6 +494,7 @@ module Dn1supBenchmark
           log_line('close_scene: активная модель сменилась — очистка НЕ выполняется')
           @state['scene'] = nil
           @state['scene_info'] = nil
+          @scene_state = nil
           return nil
         end
 
@@ -342,6 +514,7 @@ module Dn1supBenchmark
         end
         @state['scene'] = nil
         @state['scene_info'] = nil
+        @scene_state = nil
         GC.start
         nil
       end
@@ -592,46 +765,82 @@ module Dn1supBenchmark
       end
 
       # -- сцена basics: API-01/02/03/05 ---------------------------------------------------
+      # API-01 и API-03 — кусочные задачи (тяжёлые: сотни тысяч вызовов API);
+      # API-02 и API-05 — синхронные (лёгкие). План собирается в plan_basics.
 
-      def tests_basics(model, params)
+      def plan_basics(st, model, p)
+        st['jobs'] << [:task, api01_task(model, p['api01_loops'], p['iters'])]
+        st['jobs'] << [:sync, -> { test_api02(model, p) }]
+        # Определения для API-03 — дешёвый setup: строим сразу при
+        # планировании (аргумент задачи вычисляется здесь же, а не в тике).
+        defs = build_api03_defs(model, p['api03_defs'])
+        st['jobs'] << [:task, api03_task(model, defs, p['api03_instances'], p['iters'])]
+        st['jobs'] << [:sync, -> {
+          test_api05(model, p)
+          st['result'] = 'ok: basics'
+        }]
+      end
+
+      def api01_loop(model, k)
+        x = (k % 500) * 300
+        y = (k / 500) * 300
+        p1 = [x, y, 0]
+        p2 = [x + 100, y, 0]
+        p3 = [x + 100, y + 100, 0]
+        p4 = [x, y + 100, 0]
         ents = model.entities
-        loops = params['api01_loops']
+        [ents.add_line(p1, p2), ents.add_line(p2, p3),
+         ents.add_line(p3, p4), ents.add_line(p4, p1), ents.add_face(p1, p2, p3, p4)]
+      end
 
-        # API-01: рёбра и простые грани. Валидация и очистка — вне замера.
-        measure('api', 'API-01', "Создание рёбер и граней (#{loops} контуров × 4 ребра)",
-                'ms', params['iters'],
-                entities: 5 * loops, entities_created: 5 * loops,
-                ops: 5 * loops,
-                params: { 'loops' => loops, 'edges_per_loop' => 4, 'target_edges' => 4 * loops },
-                validate: proc do |created|
-                  errs = []
-                  ne = created['edges'].count(&:valid?)
-                  nf = created['faces'].count(&:valid?)
-                  errs << "рёбер валидных #{ne} вместо #{4 * loops}" if ne != 4 * loops
-                  errs << "граней валидных #{nf} вместо #{loops}" if nf != loops
-                  errs
-                end,
-                cleanup: proc do |created|
-                  list = created['edges'] + created['faces']
-                  ents.erase_entities(list.map { |e| e.valid? ? e : nil }.compact)
-                end) do |_i|
-          edges = []
-          faces = []
-          loops.times do |k|
-            x = (k % 500) * 300
-            y = (k / 500) * 300
-            p1 = [x, y, 0]
-            p2 = [x + 100, y, 0]
-            p3 = [x + 100, y + 100, 0]
-            p4 = [x, y + 100, 0]
-            edges << ents.add_line(p1, p2) << ents.add_line(p2, p3) \
-                  << ents.add_line(p3, p4) << ents.add_line(p4, p1)
-            faces << ents.add_face(p1, p2, p3, p4)
-          end
-          { 'edges' => edges, 'faces' => faces }
+      # API-01: создание рёбер и граней. Итерация = фаза создания (таймирована
+      # по кускам; длительность итерации = сумма кусков) + фаза стирания
+      # (вне замера, порциями). Валидация — подсчёт невалидных ссылок при
+      # стирании; ошибки копятся в ctx['val'].
+      def api01_task(model, loops, iters)
+        phases = []
+        iters.times do |i|
+          phases << {
+            'iter' => i, 'timed' => true, 'total' => loops, 'batch' => [loops, 400].min,
+            'work' => ->(from, to, ctx) {
+              refs = (ctx['refs'] ||= [])
+              from.upto(to - 1) { |k| refs.concat(api01_loop(model, k)) }
+            }
+          }
+          phases << {
+            'iter' => i, 'timed' => false, 'total' => 5 * loops, 'batch' => [5 * loops, 20_000].min,
+            'work' => lambda { |from, to, ctx|
+              slice = ctx['refs'][from...to]
+              keep = slice.select(&:valid?)
+              ctx['invalid'] = (ctx['invalid'] || 0) + (slice.size - keep.size)
+              model.entities.erase_entities(keep) unless keep.empty?
+            },
+            'on_done' => ->(ctx) {
+              if (ctx['invalid'] || 0).positive?
+                (ctx['val'] ||= []) << "итерация #{i}: невалидных сущностей #{ctx['invalid']} вместо 0"
+              end
+              ctx['refs'] = []
+              ctx['invalid'] = 0
+              GC.start
+            }
+          }
         end
+        make_task(phases, ->(_times, phs, ctx) {
+          iters_times = phs.select { |ph| ph['timed'] }.map { |ph| ph['sums'].to_f }
+          val = ctx['val'] || []
+          add_result('api', 'API-01', "Создание рёбер и граней (#{loops} контуров × 4 ребра)",
+                     'ms', iters_times,
+                     entities: 5 * loops, entities_created: 5 * loops, ops: 5 * loops,
+                     params: { 'loops' => loops, 'edges_per_loop' => 4, 'target_edges' => 4 * loops,
+                               'execution' => 'кусками ~1 с (UI отвечает, отмена активна)' },
+                     diagnostics: [], validation_errors: val,
+                     status: status_for(iters_times, [], val))
+        })
+      end
 
-        # API-02: группы (уникальная группа с гранью на каждый объект).
+      # API-02: группы (лёгкий тест — синхронно через measure).
+      def test_api02(model, params)
+        ents = model.entities
         n_groups = params['api02_groups']
         measure('api', 'API-02', "Создание групп (#{n_groups} групп с гранью)",
                 'ms', params['iters'],
@@ -653,33 +862,60 @@ module Dn1supBenchmark
           end
           groups
         end
+      end
 
-        # API-03: определения компонентов и экземпляры. Определения (setup,
-        # вне замера) переиспользуются — фиксируем это в параметрах.
-        defs = build_api03_defs(model, params['api03_defs'])
-        n_inst = params['api03_instances']
-        measure('api', 'API-03', "Экземпляры компонентов (#{n_inst} шт., #{defs.size} определений)",
-                'ms', params['iters'],
-                entities: n_inst, entities_created: n_inst, ops: n_inst,
-                params: { 'unique_definitions' => defs.size,
-                          'instances_per_repeat' => n_inst,
-                          'definition_reuse' => 'одно определение используется многими экземплярами' },
-                validate: proc do |instances|
-                  nv = instances.count(&:valid?)
-                  nv == instances.size ? [] : ["инстансов валидных #{nv} вместо #{instances.size}"]
-                end,
-                cleanup: proc { |instances| ents.erase_entities(instances.select(&:valid?)) }) do |_i|
-          instances = []
-          n_inst.times do |k|
-            defn = defs[k % defs.size]
-            x = (k % 100) * 400
-            y = 2_000_000 + (k / 100) * 400
-            instances << ents.add_instance(defn, Geom::Transformation.new([x, y, 0]))
-          end
-          instances
+      # API-03: определения компонентов и экземпляры (кусочно; определения —
+      # setup вне замера, переиспользуются всеми экземплярами).
+      def api03_task(model, defs, n_inst, iters)
+        defs ||= []
+        phases = []
+        iters.times do |i|
+          phases << {
+            'iter' => i, 'timed' => true, 'total' => n_inst, 'batch' => [n_inst, 2_000].min,
+            'work' => ->(from, to, ctx) {
+              refs = (ctx['refs'] ||= [])
+              ents = model.entities
+              from.upto(to - 1) do |k|
+                defn = defs[k % defs.size]
+                x = (k % 100) * 400
+                y = 2_000_000 + (k / 100) * 400
+                refs << ents.add_instance(defn, Geom::Transformation.new([x, y, 0]))
+              end
+            }
+          }
+          phases << {
+            'iter' => i, 'timed' => false, 'total' => n_inst, 'batch' => [n_inst, 20_000].min,
+            'work' => lambda { |from, to, ctx|
+              slice = ctx['refs'][from...to]
+              keep = slice.select(&:valid?)
+              ctx['invalid'] = (ctx['invalid'] || 0) + (slice.size - keep.size)
+              model.entities.erase_entities(keep) unless keep.empty?
+            },
+            'on_done' => ->(ctx) {
+              if (ctx['invalid'] || 0).positive?
+                (ctx['val'] ||= []) << "итерация #{i}: валидных инстансов не хватает (#{ctx['invalid']})"
+              end
+              ctx['refs'] = []
+              ctx['invalid'] = 0
+            }
+          }
         end
+        make_task(phases, ->(_times, phs, ctx) {
+          iters_times = phs.select { |ph| ph['timed'] }.map { |ph| ph['sums'].to_f }
+          val = ctx['val'] || []
+          add_result('api', 'API-03', "Экземпляры компонентов (#{n_inst} шт., #{defs.size} определений)",
+                     'ms', iters_times,
+                     entities: n_inst, entities_created: n_inst, ops: n_inst,
+                     params: { 'unique_definitions' => defs.size,
+                               'instances_per_repeat' => n_inst,
+                               'definition_reuse' => 'одно определение используется многими экземплярами' },
+                     diagnostics: [], validation_errors: val,
+                     status: status_for(iters_times, [], val))
+        })
+      end
 
-        # API-05: атрибуты на заранее созданных объектах (якоря вне замера).
+      # API-05: атрибуты на заранее созданных объектах (якоря вне замера).
+      def test_api05(model, params)
         anchors = build_api05_anchors(model, params['api05_objects'])
         measure('api', 'API-05', "Атрибуты: запись+чтение (#{anchors.size} объектов × 4 ключа)",
                 'ms', params['iters'],
@@ -807,81 +1043,89 @@ module Dn1supBenchmark
         view = model.active_view
         measure('graphics', 'zoom_extents', 'Zoom Extents на плотной сцене',
                 'ms', params['iters'], entities: model.entities.grep(Sketchup::Face).size,
-                params: { 'op' => 'view.zoom_extents' }) do |_i|
+                params: { 'op' => 'view.zoom_extents',
+                          'note' => 'единичный вызов вида — не кускуется, может кратко занять UI' }) do |_i|
           view.zoom_extents
         end
-
-        test_api06(model, params)
       end
 
       # API-06: операции с моделью и «транзакциями». Методика (зафиксирована):
       # вложенность 1 уровень — внутри undo-операции сцены; отдельно меряется
       # время изменения (start→modify), фиксации (commit) и отмены (abort).
       # Произвольной вложенности нет; поведение отмены проверяется валидацией
-      # (после abort грани обязаны стать невалидными).
-      def test_api06(model, params)
+      # (после abort грани обязаны стать невалидными). Кусочно: один цикл =
+      # одна порция (на large это ~секунды).
+      def api06_task(model, params)
         m = params['api06_faces']
         iters = params['iters']
         base_x = @state.dig('scene_info', 'n').to_i * 100 + 2_000 # правее сетки
-        modify = []
-        commits = []
-        mod_aborts = []
-        aborts = []
-        diag = []
-        val = []
-        cycles = []
-        iters.times do |i|
-          raise Cancelled if cancelled?
+        make_task(
+          [{ 'timed' => false, 'total' => iters, 'batch' => 1,
+             'work' => lambda { |from, to, ctx|
+               return if ctx['stop']
 
-          begin
-            t0 = Dn1supBenchmark.monotonic
-            model.start_operation("dn1_bench_tx_#{i}", true)
-            faces = add_tx_faces(model, base_x, m, i)
-            t1 = Dn1supBenchmark.monotonic
-            model.commit_operation
-            t2 = Dn1supBenchmark.monotonic
-            modify << (t1 - t0)
-            commits << (t2 - t1)
-            val << "commit #{i}: грани не валидны после фиксации" unless faces.all?(&:valid?)
+               from.upto(to - 1) { |i| api06_cycle(model, base_x, m, i, ctx) }
+             } }],
+          ->(_times, _ph, ctx) {
+            GC.start
+            cycles = ctx['cycles'] || []
+            diag = ctx['diag'] || []
+            val = ctx['val'] || []
+            add_result('api', 'API-06', 'Операции с моделью: modify / commit / abort',
+                       'ms', cycles,
+                       entities: m, ops: m * 2,
+                       params: { 'faces_per_op' => m, 'mode' => 'start_operation → add_face×N → commit_operation',
+                                 'abort_path' => 'start_operation → add_face×N → abort_operation',
+                                 'nested_in_scene_op' => true, 'nested_level' => 1 },
+                       diagnostics: diag, validation_errors: val,
+                       status: status_for(cycles, diag, val),
+                       extra: { 'modify_ms' => median_ms(ctx['modify'] || []),
+                                'commit_ms' => median_ms(ctx['commits'] || []),
+                                'abort_modify_ms' => median_ms(ctx['mod_aborts'] || []),
+                                'abort_ms' => median_ms(ctx['aborts'] || []) })
+          }
+        )
+      end
 
-            # Убираем зафиксированные грани (вне замера), чтобы повтор
-            # начинался из того же состояния.
-            model.start_operation('dn1_bench_tx_cleanup', true)
-            model.entities.erase_entities(faces.select(&:valid?))
-            model.commit_operation
+      def api06_cycle(model, base_x, m, i, ctx)
+        ctx['modify'] ||= []; ctx['commits'] ||= []
+        ctx['mod_aborts'] ||= []; ctx['aborts'] ||= []
+        ctx['cycles'] ||= []; ctx['val'] ||= []; ctx['diag'] ||= []
+        t0 = Dn1supBenchmark.monotonic
+        model.start_operation("dn1_bench_tx_#{i}", true)
+        faces = add_tx_faces(model, base_x, m, i)
+        t1 = Dn1supBenchmark.monotonic
+        model.commit_operation
+        t2 = Dn1supBenchmark.monotonic
+        ctx['modify'] << (t1 - t0)
+        ctx['commits'] << (t2 - t1)
+        ctx['val'] << "commit #{i}: грани не валидны после фиксации" unless faces.all?(&:valid?)
 
-            # Путь отмены: старт → изменение → abort.
-            t3 = Dn1supBenchmark.monotonic
-            model.start_operation("dn1_bench_tx_abort_#{i}", true)
-            faces2 = add_tx_faces(model, base_x, m, i)
-            t4 = Dn1supBenchmark.monotonic
-            model.abort_operation
-            t5 = Dn1supBenchmark.monotonic
-            mod_aborts << (t4 - t3)
-            aborts << (t5 - t4)
-            val << "abort #{i}: грани пережили отмену" if faces2.any?(&:valid?)
-            cycles << (t2 - t0 + t5 - t3)
-          rescue StandardError => e
-            diag << diag_hash(e)
-            begin
-              model.abort_operation
-            rescue StandardError
-              nil
-            end
-            break
-          end
+        # Убираем зафиксированные грани (вне замера), чтобы следующий цикл
+        # начинался из того же состояния.
+        model.start_operation('dn1_bench_tx_cleanup', true)
+        model.entities.erase_entities(faces.select(&:valid?))
+        model.commit_operation
+
+        # Путь отмены: старт → изменение → abort.
+        t3 = Dn1supBenchmark.monotonic
+        model.start_operation("dn1_bench_tx_abort_#{i}", true)
+        faces2 = add_tx_faces(model, base_x, m, i)
+        t4 = Dn1supBenchmark.monotonic
+        model.abort_operation
+        t5 = Dn1supBenchmark.monotonic
+        ctx['mod_aborts'] << (t4 - t3)
+        ctx['aborts'] << (t5 - t4)
+        ctx['val'] << "abort #{i}: грани пережили отмену" if faces2.any?(&:valid?)
+        ctx['cycles'] << ((t2 - t0) + (t5 - t3))
+      rescue StandardError => e
+        ctx['diag'] << diag_hash(e)
+        begin
+          model.abort_operation
+        rescue StandardError
+          nil
         end
-        GC.start
-        add_result('api', 'API-06', 'Операции с моделью: modify / commit / abort',
-                   'ms', cycles,
-                   entities: m, ops: m * 2,
-                   params: { 'faces_per_op' => m, 'mode' => 'start_operation → add_face×N → commit_operation',
-                             'abort_path' => 'start_operation → add_face×N → abort_operation',
-                             'nested_in_scene_op' => true, 'nested_level' => 1 },
-                   diagnostics: diag, validation_errors: val,
-                   status: status_for(cycles, diag, val),
-                   extra: { 'modify_ms' => median_ms(modify), 'commit_ms' => median_ms(commits),
-                            'abort_modify_ms' => median_ms(mod_aborts), 'abort_ms' => median_ms(aborts) })
+        ctx['stop'] = true # дальнейшие циклы бессмысленны
       end
 
       def add_tx_faces(model, base_x, m, salt)
