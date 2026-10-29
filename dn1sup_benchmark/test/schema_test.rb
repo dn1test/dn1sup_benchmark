@@ -73,9 +73,9 @@ module Dn1supBenchmark::Test
       'meta' => {
         'schema_version' => 1,
         'benchmark_version' => Dn1supBenchmark::VERSION,
-        'test_suite_version' => '4',
+        'test_suite_version' => '5',
         'extension_version' => Dn1supBenchmark::VERSION,
-        'profile' => 'small',
+        'profile' => 'suite',
         'params' => { 'iters' => 3 },
         'sketchup_version' => '24.0.594', 'version_number' => 2_400_000_594,
         'ruby_version' => RUBY_VERSION, 'ruby_description' => RUBY_DESCRIPTION,
@@ -87,7 +87,7 @@ module Dn1supBenchmark::Test
                            'graphics_engine' => nil, 'graphics_engine_note' => 'нет' },
         'sources' => { 'fps' => 'внутренний замер' }
       },
-      'run' => { 'profile' => 'small', 'status' => 'completed', 'started_at' => 'x' },
+      'run' => { 'profile' => 'suite', 'status' => 'completed', 'started_at' => 'x' },
       'results' => [
         { 'id' => 'model_build', 'name' => 'Сборка сложной модели', 'group' => 'modeling', 'category' => 'modeling',
           'test_version' => '1', 'unit' => 'ms', 'higher_is_better' => false,

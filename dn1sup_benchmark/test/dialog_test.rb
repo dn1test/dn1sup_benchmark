@@ -10,22 +10,21 @@ module Dn1supBenchmark::Test
   D = Dn1supBenchmark::Dialog
 
   test 'dialog: plan_data отдаёт шаги и категории' do
-    data = D.send(:plan_data, 'small', nil)
-    assert(data['steps'].size >= 12, 'полный план шагов (suite v4: 14 шагов)')
+    data = D.send(:plan_data)
+    assert(data['steps'].size >= 12, 'полный план шагов (suite v5: 14 шагов)')
     assert(data['categories'].is_a?(Array) && !data['categories'].empty?, 'категории для фильтра')
-    assert(data['params'].is_a?(Hash), 'параметры профиля')
+    assert(data['params'].is_a?(Hash), 'параметры набора')
+    assert_equal('suite', data['profile'], 'один набор без выбора')
   end
 
-  test 'dialog: plan_data предупреждение для всех профилей (файл ~500 МБ)' do
-    %w[small medium large].each do |profile|
-      assert(!D.send(:plan_data, profile, nil)['warning'].nil?, "предупреждение для #{profile} обязательно")
-    end
+  test 'dialog: plan_data содержит предупреждение о файле' do
+    assert(D.send(:plan_data)['warning'].to_s.include?('МБ'), 'предупреждение о файле обязательно')
   end
 
   test 'dialog: run_results_data группирует результаты' do
     run = {
-      'meta' => { 'sketchup_version' => '27.0', 'profile' => 'small', 'started_at' => 'x',
-                  'test_suite_version' => '4', 'ruby_version' => RUBY_VERSION, 'cpu' => 'T' },
+      'meta' => { 'sketchup_version' => '27.0', 'profile' => 'suite', 'started_at' => 'x',
+                  'test_suite_version' => '5', 'ruby_version' => RUBY_VERSION, 'cpu' => 'T' },
       'run' => { 'status' => 'completed' },
       'results' => [
         { 'id' => 'tool_draw', 'name' => 'Черчение', 'group' => 'tools', 'status' => 'passed',
@@ -38,13 +37,5 @@ module Dn1supBenchmark::Test
     assert_equal(1, out['groups'].size)
     assert_equal('tool_draw', out['groups'].first['tests'].first['id'])
     assert_equal('completed', out['run']['status'])
-  end
-
-  test 'dialog: load_settings валиден и мержит дефолты' do
-    s = D.send(:load_settings)
-    assert(s.is_a?(Hash))
-    assert(s.key?('profile'), 'есть профиль')
-    assert(s.key?('wave_s'), 'есть длительность волны')
-    assert(s.key?('target_mb'), 'есть цель файла')
   end
 end

@@ -8,13 +8,13 @@
 module Dn1supBenchmark
   class << self
     # План шагов прогона (для внешнего оркестратора).
-    def benchmark_steps(profile = 'small', overrides = nil)
-      Runner.steps(profile, overrides)
+    def benchmark_steps
+      Runner.steps
     end
 
-    # Краткое описание плана и параметров профиля (без исполнения).
-    def benchmark_plan(profile = 'small', overrides = nil)
-      Runner.plan_preview(profile, overrides)
+    # Краткое описание плана и параметров набора (без исполнения).
+    def benchmark_plan
+      Runner.plan_preview
     end
 
     # Выполнить один шаг. Шаг сцены может вернуть :in_progress — тяжёлая

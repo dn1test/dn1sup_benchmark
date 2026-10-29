@@ -7,7 +7,7 @@ require 'json'
 
 module Dn1supBenchmark::Test
   S = Dn1supBenchmark::Score
-  BASELINE_V4 = File.expand_path('../baseline-small-v4.json', __dir__)
+  BASELINE_V5 = File.expand_path('../baseline-suite-v5.json', __dir__)
 
   def self.score_run(values)
     results = values.map do |id, (value, unit)|
@@ -21,20 +21,20 @@ module Dn1supBenchmark::Test
         'validation' => { 'passed' => true, 'errors' => [] },
         'error' => nil, 'diagnostics' => [], 'value' => value }
     end
-    { 'meta' => { 'profile' => 'small', 'test_suite_version' => '4' },
+    { 'meta' => { 'profile' => 'suite', 'test_suite_version' => '5' },
       'run' => { 'status' => 'completed' }, 'results' => results }
   end
 
-  # Подмена базы: пока baseline-small-v4.json не заморожен живым прогоном,
-  # формулу проверяем на синтетической базе (все включённые тесты).
+  # Подмена базы: формулу проверяем на синтетической базе (все включённые
+  # тесты), живая baseline-suite-v5.json проверяется отдельным тестом.
   def self.with_fake_baseline
-    fake = { 'profile' => 'small',
+    fake = { 'profile' => 'suite',
              'values' => S::INCLUDED.values.flatten.each_with_object({}) do |id, h|
                h[id] = id.start_with?('fps_') ? { 'value' => 50.0, 'unit' => 'fps' } : { 'value' => 100.0, 'unit' => 'ms' }
              end,
              'reference' => { 'source_run' => 'fake' } }
     S.singleton_class.send(:alias_method, :real_load_baseline, :load_baseline)
-    S.singleton_class.send(:define_method, :load_baseline) { |profile| profile == 'small' ? fake : nil }
+    S.singleton_class.send(:define_method, :load_baseline) { |profile| profile == 'suite' ? fake : nil }
     yield fake
   ensure
     S.singleton_class.send(:alias_method, :load_baseline, :real_load_baseline)
@@ -95,28 +95,28 @@ module Dn1supBenchmark::Test
     end
   end
 
-  test 'профиль без baseline → unavailable с причиной' do
+  test 'набор без baseline → unavailable с причиной' do
     with_fake_baseline do
       run = score_run({})
-      run['meta']['profile'] = 'medium'
+      run['meta']['profile'] = 'unknown'
       score = S.compute(run)
       assert_equal('unavailable', score['status'])
       assert_nil(score['overall'])
-      assert(score['reason'].to_s.include?('medium'))
+      assert(score['reason'].to_s.include?('unknown'))
     end
   end
 
   test 'nil-прогон → nil, кривой прогон → unavailable без падения' do
     with_fake_baseline do
       assert_nil(S.compute(nil))
-      score = S.compute('results' => 42, 'meta' => { 'profile' => 'small' })
+      score = S.compute('results' => 42, 'meta' => { 'profile' => 'suite' })
       assert_equal('unavailable', score['status'])
     end
   end
 
-  test 'реальная база (если заморожена): файл v4 валиден' do
-    skip("нет #{File.basename(BASELINE_V4)} — замораживается живым прогоном") unless File.exist?(BASELINE_V4)
-    base = JSON.parse(File.read(BASELINE_V4))
+  test 'реальная база (если заморожена): файл v5 валиден' do
+    skip("нет #{File.basename(BASELINE_V5)} — замораживается живым прогоном") unless File.exist?(BASELINE_V5)
+    base = JSON.parse(File.read(BASELINE_V5))
     ids = base['values'].keys
     S::INCLUDED.values.flatten.each do |id|
       assert(ids.include?(id), "в базе нет #{id}")
@@ -127,11 +127,11 @@ module Dn1supBenchmark::Test
            "балл на реальной базе должен быть ~1000, получили #{score['overall']}")
   end
 
-  test 'баллы сравнимы только в одном профиле' do
+  test 'баллы сравнимы только в одном наборе' do
     rep = Dn1supBenchmark::Report
-    a = { 'profile' => 'small', 'overall' => 1000.0 }
-    assert_nil(rep.score_compatibility(a, { 'profile' => 'small', 'overall' => 1200.0 }))
-    assert_equal('профиль различается', rep.score_compatibility(a, { 'profile' => 'medium', 'overall' => 1200.0 }))
-    assert_equal('нет балла', rep.score_compatibility(a, { 'profile' => 'small', 'overall' => nil }))
+    a = { 'profile' => 'suite', 'overall' => 1000.0 }
+    assert_nil(rep.score_compatibility(a, { 'profile' => 'suite', 'overall' => 1200.0 }))
+    assert_equal('профиль различается', rep.score_compatibility(a, { 'profile' => 'small', 'overall' => 1200.0 }))
+    assert_equal('нет балла', rep.score_compatibility(a, { 'profile' => 'suite', 'overall' => nil }))
   end
 end

@@ -18,8 +18,6 @@ require 'json'
 
 module Dn1supBenchmark
   module Dialog
-    SETTINGS_KEY = 'settings'
-
     class << self
       def show
         # Повторный вызов просто поднимает существующее окно наверх.
@@ -44,7 +42,6 @@ module Dn1supBenchmark
         @dlg.show
         @dlg
       end
-
       # Вызывается из Dn1supBenchmark.unload! — окно НЕ закрываем (его закрывает
       # пользователь), только забываем ссылку и глушим рассылку событий.
       def unload
@@ -110,15 +107,14 @@ module Dn1supBenchmark
           push(dlg, 'overview', overview_data)
         end
 
-        dlg.add_action_callback('get_plan') do |_ctx, profile, overrides_json|
-          overrides = parse_json(overrides_json)
-          push(dlg, 'plan', plan_data(profile, overrides))
+        dlg.add_action_callback('get_plan') do |_ctx|
+          push(dlg, 'plan', plan_data)
         rescue StandardError => e
           push(dlg, 'error', { 'message' => "#{e.class}: #{e.message}" })
         end
 
-        dlg.add_action_callback('start_run') do |_ctx, profile, overrides_json|
-          start_run(dlg, profile, parse_json(overrides_json))
+        dlg.add_action_callback('start_run') do |_ctx|
+          start_run(dlg)
         rescue StandardError => e
           push(dlg, 'error', { 'message' => "#{e.class}: #{e.message}" })
         end
@@ -145,18 +141,6 @@ module Dn1supBenchmark
           push(dlg, 'error', { 'message' => "Сравнение: #{e.class}: #{e.message}" })
         end
 
-        dlg.add_action_callback('save_settings') do |_ctx, settings_json|
-          settings = parse_json(settings_json) || {}
-          Sketchup.write_default('dn1sup_benchmark', SETTINGS_KEY, JSON.generate(settings))
-          push(dlg, 'notice', { 'message' => 'Настройки сохранены' })
-        rescue StandardError => e
-          push(dlg, 'error', { 'message' => "Настройки: #{e.class}: #{e.message}" })
-        end
-
-        dlg.add_action_callback('get_settings') do |_ctx|
-          push(dlg, 'settings', load_settings)
-        end
-
         dlg.add_action_callback('open_path') do |_ctx, path, report_kind|
           if report_kind == 'dir'
             UI.openURL("file:///#{path.to_s.tr('\\', '/')}")
@@ -181,14 +165,14 @@ module Dn1supBenchmark
         JSON.parse(str)
       end
 
-      def plan_data(profile, overrides)
-        preview = Runner.plan_preview(profile, overrides)
+      def plan_data
+        preview = Runner.plan_preview
         by_cat = preview['steps'].group_by { |s| s['category'].to_s }
         preview['categories'] = by_cat.map { |cat, steps| { 'category' => cat, 'count' => steps.size } }
         preview
       end
 
-      def start_run(dlg, profile, overrides)
+      def start_run(dlg)
         if Sequencer.running?
           push(dlg, 'notice', { 'message' => 'Прогон уже идёт' })
           return
@@ -199,14 +183,13 @@ module Dn1supBenchmark
           return
         end
 
-        # Подтверждение согласия — в UI диалога (кнопка «Запустить» активна
-        # только после показа нагрузки), здесь дублируем краткую памятку.
-        params = Runner.profile_params(profile, overrides)
+        # Подтверждение согласия — в UI диалога (кнопка «Запустить» с памяткой),
+        # здесь дублируем краткую памятку.
         push(dlg, 'notice',
-             { 'message' => "Старт (#{profile}): временно создаётся и откатывается геометрия в " \
+             { 'message' => "Старт (набор v#{Runner::SUITE_VERSION}): временно создаётся и откатывается геометрия в " \
                             "«#{model.title}». Не переключайте вкладки моделей до конца прогона." })
-        puts "[dn1sup_benchmark] старт прогона #{profile} из диалога"
-        Sequencer.start(profile, overrides, ->(ev) { push_event(dlg, ev) })
+        puts "[dn1sup_benchmark] старт прогона из диалога"
+        Sequencer.start(->(ev) { push_event(dlg, ev) })
       end
 
       def run_results_data(data)
@@ -227,17 +210,6 @@ module Dn1supBenchmark
               end }
           end
         }
-      end
-
-      def load_settings
-        raw = Sketchup.read_default('dn1sup_benchmark', SETTINGS_KEY)
-        settings = parse_json(raw) || {}
-        defaults = { 'profile' => 'small', 'iters' => nil, 'fps_s' => nil,
-                     'wave_s' => nil, 'target_mb' => nil }
-        defaults.merge(settings)
-      rescue StandardError
-        { 'profile' => 'small', 'iters' => nil, 'fps_s' => nil,
-          'wave_s' => nil, 'target_mb' => nil }
       end
     end
   end

@@ -1,55 +1,47 @@
 # frozen_string_literal: true
 # dn1sup_benchmark/test/runner_test.rb — методика раннера и контракт теста
-# (без живого прогона: он проверяется калибровочным запуском small).
+# (без живого прогона: он проверяется калибровочным запуском набора).
 
 require_relative 'test_helper'
 
 module Dn1supBenchmark::Test
   R = Dn1supBenchmark::Runner
 
-  test 'PROFILES: small/medium/large с параметрами пяти категорий' do
-    %w[small medium large].each do |p|
-      prof = R::PROFILES[p]
-      assert(prof, "нет профиля #{p}")
-      %w[diverse poly wave tools storage].each do |key|
-        assert(prof[key].is_a?(Hash), "#{p}: нет параметров #{key}")
-      end
-      assert(prof['target_mb'].to_f.positive?, "#{p}: цель файла")
-      assert(prof['targets']['instances'].positive?, "#{p}: цель по инстансам")
+  test 'SUITE: один набор с параметрами пяти категорий' do
+    %w[diverse poly wave tools storage].each do |key|
+      assert(R::SUITE[key].is_a?(Hash), "нет параметров #{key}")
     end
+    assert(R::SUITE['target_mb'].to_f.positive?, 'цель файла')
+    assert(R::SUITE['targets']['instances'].positive?, 'цель по инстансам')
+    assert_equal('suite', R::SUITE_PROFILE, 'одно имя профиля для отчётов и baseline')
   end
 
-  test 'profile_params: переопределяются только разрешённые ключи' do
-    base = R::PROFILES['small']['storage']['boxes']
-    p = R.profile_params('small', 'iters' => 7, 'storage' => { 'boxes' => 1 },
-                         'wave_s' => 5.0, 'zzz' => 2)
-    assert_equal(7, p['iters'], 'iters переопределяется')
-    assert_equal(5.0, p['wave_s'], 'wave_s переопределяется')
-    assert_equal(base, p['storage']['boxes'], 'вложенные ключи не переопределяются')
-    assert_raises(ArgumentError) { R.profile_params('mega') }
-    assert_raises(ArgumentError) { R.profile_params('custom', nil) }
-    custom = R.profile_params('custom', R::PROFILES['small'])
-    assert_equal('custom', custom['profile'], 'custom принимает полный набор параметров')
-    custom2 = R.profile_params('custom', R::PROFILES['small'].merge('target_mb' => 100))
-    assert_equal(100, custom2['target_mb'], 'custom принимает target_mb')
+  test 'suite_params: полная независимая копия набора' do
+    p = R.suite_params
+    assert_equal(R::SUITE['storage']['boxes'], p['storage']['boxes'])
+    assert_equal('suite', p['profile'], 'в параметрах есть имя профиля для отчёта')
+    p['storage']['boxes'] = 1
+    p['target_mb'] = 9999
+    assert_equal(R::SUITE['storage']['boxes'], R.suite_params['storage']['boxes'],
+                 'изменение копии не трогает константу набора')
+    assert_equal(130, R.suite_params['target_mb'], 'цель файла фиксирована')
   end
 
   test 'лимиты безопасности (уроки инцидентов SU2027)' do
-    R::PROFILES.each do |name, prof|
-      dv = prof['diverse']
-      inst = dv['grid'] * dv['grid'] * dv['leaves']
-      assert(inst <= 10_000, "#{name}: компонентная сцена #{inst} инстансов > 10 000")
-      assert(prof['poly']['n'] <= 100, "#{name}: полигональная сетка #{prof['poly']['n']}² > 100²")
-      assert(prof['wave']['grid'] <= 80, "#{name}: полотно волны #{prof['wave']['grid']}² > 80²")
-      assert(prof['wave_s'] <= 12.0, "#{name}: волна #{prof['wave']['wave_s'] || prof['wave_s']} с — слишком долго")
-      assert(prof['target_mb'] <= 2_000, "#{name}: цель файла #{prof['target_mb']} МБ слишком велика")
-      assert(prof['iters'] <= 3, "#{name}: iters=#{prof['iters']} слишком много")
-      assert(prof['fps_s'] <= 3.0, "#{name}: fps_s=#{prof['fps_s']} слишком долго")
-    end
+    prof = R::SUITE
+    dv = prof['diverse']
+    inst = dv['grid'] * dv['grid'] * dv['leaves']
+    assert(inst <= 10_000, "компонентная сцена #{inst} инстансов > 10 000")
+    assert(prof['poly']['n'] <= 100, "полигональная сетка #{prof['poly']['n']}² > 100²")
+    assert(prof['wave']['grid'] <= 80, "полотно волны #{prof['wave']['grid']}² > 80²")
+    assert(prof['wave_s'] <= 12.0, "волна #{prof['wave_s']} с — слишком долго")
+    assert(prof['target_mb'] <= 2_000, "цель файла #{prof['target_mb']} МБ слишком велика")
+    assert(prof['iters'] <= 3, "iters=#{prof['iters']} слишком много")
+    assert(prof['fps_s'] <= 3.0, "fps_s=#{prof['fps_s']} слишком долго")
   end
 
-  test 'steps: план v4 (5 сцен, 4 fps, волна, storage_open)' do
-    steps = R.steps('small')
+  test 'steps: план v5 (5 сцен, 4 fps, волна, storage_open)' do
+    steps = R.steps
     kinds = steps.map { |s| s['kind'] }
     assert_equal('begin', kinds.first)
     assert_equal('finish', kinds.last)
@@ -63,23 +55,19 @@ module Dn1supBenchmark::Test
     refute(kinds.include?('doc'), 'DOC-шаг удалён (suite v4)')
     modes = steps.select { |s| s['kind'] == 'fps' }.map { |s| s['mode'] }
     refute(modes.include?('pages'), 'page-switch запрещён (инцидент 2026-10-28)')
+    assert_equal(130, R::SUITE['target_mb'], 'цель файла набора ~130 МБ (прогон ~1 минута)')
   end
 
-  test 'steps: предупреждения профилей упоминают файл' do
-    %w[small medium large].each do |p|
-      assert(R.profile_warning(p).to_s.include?('500'), "#{p}: предупреждение о файле обязательно")
-    end
-  end
-
-  test 'steps: неизвестный профиль даёт ошибку' do
-    assert_raises(ArgumentError) { R.steps('mega') }
+  test 'предупреждение набора упоминает файл и минуту' do
+    assert(R::SUITE_WARNING.include?('МБ'), 'предупреждение о файле обязательно')
+    assert(R::SUITE_WARNING.include?('минут'), 'предупреждение о длительности прогона')
   end
 
   test 'plan_preview: полный план с предупреждением' do
-    pp = R.plan_preview('large')
+    pp = R.plan_preview
     assert(pp['warning'].to_s.include?('МБ'), 'предупреждение должно упоминать файл')
-    assert_equal(R.steps('large').size, pp['steps'].size, 'в превью все шаги')
-    assert_equal(R.steps('small').size, R.plan_preview('small')['steps'].size)
+    assert_equal(R.steps.size, pp['steps'].size, 'в превью все шаги')
+    assert_equal('suite', pp['profile'], 'превью называет единственный набор')
   end
 
   test 'median: нечётное, чётное, пустое' do

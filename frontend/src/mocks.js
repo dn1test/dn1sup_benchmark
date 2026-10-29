@@ -15,8 +15,8 @@ const mockOverview = {
     platform: 'x64-mingw-ucrt',
     cpu: 'AMD Ryzen 9 7950X',
     cores: '32',
-    benchmark_version: '0.6.0',
-    test_suite_version: '4',
+    benchmark_version: '0.7.0',
+    test_suite_version: '5',
     schema_version: '1',
     environment: {
       ui_scale_factor: 1.0,
@@ -24,8 +24,8 @@ const mockOverview = {
     }
   },
   last_run: {
-    file: '2026-10-29 12:00',
-    profile: 'small',
+    file: '2026-10-30 12:00',
+    profile: 'suite',
     sketchup: '27.0.123',
     run: { status: 'passed' },
     tests: 12,
@@ -38,8 +38,8 @@ const mockOverview = {
       { id: 'poly.view_rotate', name: 'Вращение вьюпорта', status: 'passed', unit: 'fps', value: 58.2 },
       { id: 'wave.pushpull', name: 'Волна: Push/Pull', status: 'failed', unit: 'ms', value: 1893 },
       { id: 'tools.draw', name: 'Инструмент Линия', status: 'passed', unit: 'ops', value: 420 },
-      { id: 'storage.save_500mb', name: 'Сохранение ~500 МБ', status: 'passed', unit: 'ms', value: 12400 },
-      { id: 'storage.open_500mb', name: 'Открытие ~500 МБ', status: 'passed', unit: 'ms', value: 18900 },
+      { id: 'storage.save', name: 'Сохранение файла', status: 'passed', unit: 'ms', value: 12400 },
+      { id: 'storage.open', name: 'Открытие файла', status: 'passed', unit: 'ms', value: 18900 },
       { id: 'png.gen_2k', name: 'Экспорт PNG 2K', status: 'passed', unit: 'ms', value: 1102 },
       { id: 'scenes.switch', name: 'Переключение сцен', status: 'cancelled', unit: 'ms', value: 92 }
     ]
@@ -49,15 +49,16 @@ const mockOverview = {
 }
 
 const mockPlanBase = {
-  profile: 'small',
-  warning: null,
+  profile: 'suite',
+  warning: 'Полный прогон занимает ~1 минуту. Тест файла ~130 МБ: генерация текстур и сохранение занимают большую часть минуты прогона, нужно ~0,5 ГБ свободного места; во время сохранения/открытия UI кратко блокируется.',
   params: {
-    targets: { instances: 1024, file_mb: 500 },
+    targets: { instances: 1024, file_mb: 130 },
     diverse: { grid: 16, leaves: 4 },
     poly: { n: 40, segments: 36 },
     wave: { grid: 36 },
+    storage: { boxes: 1200, tex_size: 4096, max_tex: 24 },
     wave_s: 8.0,
-    target_mb: 500,
+    target_mb: 130,
     iters: 3,
     fps_s: 2.0
   },
@@ -80,21 +81,16 @@ const mockPlanBase = {
   ]
 }
 
-function mockPlan(profile) {
-  const p = { ...mockPlanBase, profile }
-  if (profile === 'large') {
-    p.warning = 'Профиль large требует ~2 ГБ свободной RAM и несколько минут на сборку модели.'
-    p.params = { ...mockPlanBase.params, targets: { instances: 8192, file_mb: 690 } }
-  }
-  return p
+function mockPlan() {
+  return { ...mockPlanBase }
 }
 
 const mockResults = {
-  meta: { sketchup_version: '27.0.123', profile: 'small', started_at: '2026-10-29 12:00' },
+  meta: { sketchup_version: '27.0.123', profile: 'suite', started_at: '2026-10-30 12:00' },
   run: { status: 'passed' },
   score: {
     overall: 1023.4,
-    profile: 'small',
+    profile: 'suite',
     status: 'passed',
     baseline: '2026-09-20 small',
     missing: ['storage']
@@ -117,17 +113,17 @@ const mockResults = {
     {
       group: 'storage', title: 'Файл',
       tests: [
-        { id: 'storage.save_500mb', name: 'Сохранение ~500 МБ', status: 'passed', unit: 'ms', value: 12400, min: 11900, max: 13100, p95: 13000, repeats: 2, ops: null, entities: null, error: null }
+        { id: 'storage.save', name: 'Сохранение файла', status: 'passed', unit: 'ms', value: 12400, min: 11900, max: 13100, p95: 13000, repeats: 2, ops: null, entities: null, error: null }
       ]
     }
   ]
 }
 
 const mockRuns = [
-  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-29_120000.json', sketchup: '27.0.123', profile: 'small', started_at: '2026-10-29 12:00', suite: '4', tests: 12 },
-  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-28_181500.json', sketchup: '27.0.123', profile: 'medium', started_at: '2026-10-28 18:15', suite: '4', tests: 12 },
-  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-20_093000.json', sketchup: '26.0.456', profile: 'small', started_at: '2026-10-20 09:30', suite: '4', tests: 12 },
-  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-12_110000.json', sketchup: '26.0.456', profile: 'small', started_at: '2026-10-12 11:00', suite: '3', tests: 10 }
+  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-30_120000.json', sketchup: '27.0.123', profile: 'suite', started_at: '2026-10-30 12:00', suite: '5', tests: 12 },
+  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-29_181500.json', sketchup: '27.0.123', profile: 'suite', started_at: '2026-10-29 18:15', suite: '5', tests: 12 },
+  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-20_093000.json', sketchup: '26.0.456', profile: 'suite', started_at: '2026-10-20 09:30', suite: '5', tests: 12 },
+  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-12_110000.json', sketchup: '26.0.456', profile: 'small', started_at: '2026-10-12 11:00', suite: '4', tests: 10 }
 ]
 
 const mockCompare = {
@@ -151,8 +147,6 @@ const mockCompare = {
   ]
 }
 
-const mockSettings = { profile: 'small', iters: null, fps_s: null, wave_s: null, target_mb: null }
-
 // Симуляция прогона: start → шаги с chunk/fps_tick → finish.
 function runMockSequence() {
   const total = 6
@@ -165,7 +159,7 @@ function runMockSequence() {
     'Сохранение файла'
   ]
   let t = 200
-  later(() => receive('event', { event: 'start', profile: 'small', total }), t)
+  later(() => receive('event', { event: 'start', profile: 'suite', total }), t)
   steps.forEach((label, i) => {
     const idx = i + 1
     t += 300
@@ -199,12 +193,10 @@ function runMockSequence() {
 export function installMock() {
   window.sketchup = {
     get_overview() { later(() => receive('overview', mockOverview)) },
-    get_settings() { later(() => receive('settings', mockSettings)) },
-    get_plan(profile) { later(() => receive('plan', mockPlan(profile)), 250) },
+    get_plan() { later(() => receive('plan', mockPlan()), 250) },
     get_results() { later(() => receive('results', mockResults)) },
     get_runs() { later(() => receive('runs', { items: mockRuns })) },
     compare_runs() { later(() => receive('compare', mockCompare), 300) },
-    save_settings() { later(() => receive('notice', { message: 'Настройки сохранены (mock)' })) },
     start_run() { runMockSequence() },
     cancel_run() { later(() => receive('notice', { message: 'Отмена запрошена — остановится после текущего теста (mock)' })) },
     open_path() { later(() => receive('notice', { message: 'open_path: папка отчётов (mock)' })) },

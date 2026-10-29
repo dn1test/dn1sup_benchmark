@@ -35,7 +35,7 @@ require File.join(File.dirname(__FILE__), 'sequencer.rb')
 require File.join(File.dirname(__FILE__), 'command.rb')
 
 module Dn1supBenchmark
-  VERSION   = '0.6.0'.freeze
+  VERSION   = '0.7.0'.freeze
   PLUG_ROOT = File.dirname(__FILE__).freeze
   TOOLBAR_NAME = 'DN1Sup Benchmark'.freeze
   CMD_TOOLTIP  = 'DN1Sup Benchmark: панель'.freeze
@@ -95,9 +95,7 @@ module Dn1supBenchmark
       menu = track_menu(parent, parent.add_submenu('Benchmark'))
       menu.add_item('Панель бенчмарка…')            { safe { show_panel } }
       menu.add_separator
-      menu.add_item('Прогнать (small)…')            { safe { run_benchmark('small') } }
-      menu.add_item('Прогнать (medium)…')           { safe { run_benchmark('medium') } }
-      menu.add_item('Прогнать (large)…')            { safe { run_benchmark('large') } }
+      menu.add_item('Прогнать…')                    { safe { run_benchmark } }
       menu.add_item('Отменить прогон')              { safe { Sequencer.cancel } }
       menu.add_separator
       menu.add_item('Открыть последний отчёт')      { safe { open_last_report } }
@@ -159,8 +157,8 @@ module Dn1supBenchmark
       UI.messagebox("DN1Sup Benchmark v#{VERSION} (набор тестов v#{Runner::SUITE_VERSION})\n\n" \
                     "Пять категорий: моделирование сложной модели, инструменты SketchUp " \
                     "(API-эквиваленты), FPS вьюпорта на тяжёлой сцене, волна из кубиков " \
-                    "100×100 мм с оборотом камеры, файл ~500 МБ (сохранение/загрузка). " \
-                    "Отчёты и сравнение прогонов.\n\n" \
+                    "100×100 мм с оборотом камеры, файл ~130 МБ (сохранение/загрузка). " \
+                    "Набор один, полный прогон ~1 минута. Отчёты и сравнение прогонов.\n\n" \
                     "Отчёты: #{Report.report_dir}")
     end
 
@@ -199,7 +197,7 @@ module Dn1supBenchmark
 
     # -- запуск прогона из меню -----------------------------------------------
 
-    def run_benchmark(profile, overrides = nil)
+    def run_benchmark
       if Sequencer.running?
         UI.messagebox('Прогон уже идёт — сначала отмените или дождитесь завершения.')
         return
@@ -210,27 +208,27 @@ module Dn1supBenchmark
         return
       end
       # Согласие пользователя: бенчмарк временно создаёт и откатывает
-      # геометрию в ТЕКУЩЕЙ модели; тест файла собирает ~500 МБ во временной
-      # папке (несколько минут, ~1,5 ГБ диска). Подтверждение обязательно
-      # перед каждым прогоном; профили предупреждают дополнительно.
-      preview = "Профиль: #{profile}\nМодель: #{model.title}\n" \
-                "Повторов на тест: #{Runner.profile_params(profile, overrides)['iters']}\n" \
-                "Файл: цель ~#{Runner.profile_params(profile, overrides)['target_mb']} МБ " \
-                "(сборка и сохранение — несколько минут)\n\n" \
+      # геометрию в ТЕКУЩЕЙ модели; тест файла собирает файл во временной
+      # папке. Подтверждение обязательно перед каждым прогоном.
+      params = Runner.suite_params
+      preview = "Набор тестов: v#{Runner::SUITE_VERSION} (5 категорий, полный прогон ~1 минута)\n" \
+                "Модель: #{model.title}\n" \
+                "Повторов на тест: #{params['iters']}\n" \
+                "Файл: цель ~#{params['target_mb']} МБ " \
+                "(генерация текстур и сохранение — большая часть минуты)\n\n" \
                 'Бенчмарк временно создаёт и откатывает геометрию в текущей модели. ' \
                 'Сохраните модель и не переключайте вкладки до конца прогона. ' \
-                'Волна видна во вьюпоре; большой файл открывается в отдельной вкладке ' \
+                'Волна видна во вьюпорте; файл открывается в отдельной вкладке ' \
                 'и удаляется.\n\nЗапустить?'
       if UI.messagebox(preview, UI::MB_OKCANCEL) != UI::IDOK
         return
       end
-      warning = Runner.profile_warning(profile)
-      if warning && UI.messagebox("#{warning}\n\nЗапустить?", UI::MB_OKCANCEL) != UI::IDOK
+      if UI.messagebox("#{Runner::SUITE_WARNING}\n\nЗапустить?", UI::MB_OKCANCEL) != UI::IDOK
         return
       end
 
-      puts "[dn1sup_benchmark] старт прогона #{profile}"
-      Sequencer.start(profile, overrides)
+      puts "[dn1sup_benchmark] старт прогона (набор v#{Runner::SUITE_VERSION})"
+      Sequencer.start
     end
   end
 end

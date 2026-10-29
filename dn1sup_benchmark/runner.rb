@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 # =============================================================================
-# dn1sup_benchmark/runner.rb — методика и выполнение бенчмарка (набор v4).
+# dn1sup_benchmark/runner.rb — методика и выполнение бенчмарка (набор v5).
 #
 # Прогон = последовательность ШАГОВ (Runner.steps), ровно пять категорий ТЗ:
 #   1. modeling  — эмуляция моделирования: сложная модель из уникальных
@@ -15,9 +15,11 @@
 #   4. animation — волна из кубиков 100×100×100 мм: бегущая диагональная
 #                  волна пакетами Entities#transform_entities + полный
 #                  оборот камеры (WaveTool);
-#   5. storage   — файл ~500 МБ: кусковая сборка (уникальная геометрия +
+#   5. storage   — файл ~130 МБ: кусковая сборка (уникальная геометрия +
 #                  шумовые PNG-текстуры), калибровка размера, сохранение ×2
 #                  и открытие с МБ/с.
+#
+# Набор ОДИН, без профилей и переопределений: полный прогон ~1 минута.
 #
 # Один и тот же план исполняется двумя способами:
 #   • из меню/диалога — секвенсор на UI.start_timer (sequencer.rb): UI не
@@ -39,9 +41,9 @@
 #
 # Отмена: Runner.cancel! поднимает флаг; между повторами, порциями и шагами
 # выполняющий код бросает Cancelled — результат получает статус cancelled,
-# отчёт всё равно сохраняется. Сохранение/открытие файла ~500 МБ —
-# атомарные вызовы ядра, на их время UI кратко блокируется (отмечено
-# в параметрах теста и предупреждении профиля).
+# отчёт всё равно сохраняется. Сохранение/открытие файла — атомарные вызовы
+# ядра, на их время UI кратко блокируется (отмечено в параметрах теста и
+# предупреждении набора).
 # =============================================================================
 
 require 'json'
@@ -50,12 +52,16 @@ module Dn1supBenchmark
   module Runner
     # Версия НАБОРА тестов: меняется при изменении состава/методики
     # (сравнение прогонов с разными suite-версиями помечается несовместимым).
+    # 5 — набор ОДИН, без профилей и переопределений: параметры small с целью
+    #     файла 130 МБ вместо 500 — полный прогон укладывается ~в минуту
+    #     (500 МБ давали ~2 мин только на генерацию текстур). Прогоны v4
+    #     несравнимы с v5 (сравнение пометит по test_suite_version).
     # 4 — полная смена набора под ТЗ от 2026-10-28: удалены RUBY/API-xx/
     #     сцены nested/grid/textured/DOC (малый файл)/fps_grid_*; новые
     #     категории modeling/tools/viewport/animation/storage (волна,
     #     файл ~500 МБ). Лимит компонентных сцен ≤10 тыс. инстансов —
     #     урок зависания SU2027 на 80 тыс. (suite v3).
-    SUITE_VERSION = '4'
+    SUITE_VERSION = '5'
     # Версия конкретного теста: менять при изменении его измеряемой операции.
     TEST_VERSION = '1'
 
@@ -65,7 +71,7 @@ module Dn1supBenchmark
       'tools' => '2. Инструменты SketchUp (API-эквиваленты)',
       'viewport' => '3. Вьюпорт: FPS на тяжёлой модели',
       'animation' => '4. Анимация: волна из кубиков 100×100 мм',
-      'storage' => '5. Файл ~500 МБ: сохранение и загрузка'
+      'storage' => '5. Файл: сохранение и загрузка'
     }.freeze
 
     class Cancelled < StandardError
@@ -82,65 +88,38 @@ module Dn1supBenchmark
       end
     end
 
-    # Профили: три ступени нагрузки для категорий 1–4; тест файла во всех
-    # профилях с целью 500 МБ (настраивается). Параметры сцен записываются
-    # в отчёт (meta.params + параметры каждого теста).
+    # Единый набор нагрузки (профилей нет): параметры пяти категорий,
+    # полный прогон ~1 минута. Параметры сцен записываются в отчёт
+    # (meta.params + параметры каждого теста).
     #   diverse: grid² сборок × leaves листьев = всего инстансов
     #            (лимит ≤10 000 — зависание SU2027 на 80 000);
     #   poly:    n² цилиндров по segments сегментов ≈ n²×(2s+2) треугольников;
     #   wave:    grid² кубов 100×100×100 мм, волна wave_s секунд;
     #   tools:   масштабы фикстур тестов инструментов;
-    #   storage: уникальных тел + шумовые текстуры 4096² до цели target_mb.
-    PROFILES = {
-      'small' => {
-        'targets' => { 'instances' => 1_024, 'triangles' => 173_000, 'file_mb' => 500 },
-        'diverse' => { 'grid' => 16, 'leaves' => 4, 'leaf_defs' => 24, 'asm_defs' => 6 },
-        'poly' => { 'n' => 40, 'segments' => 36 },
-        'wave' => { 'grid' => 36 },
-        'tools' => { 'draw' => 240, 'pushpull' => 24, 'inst' => 240,
-                     'followme' => 8, 'intersect' => 16, 'paint' => 240 },
-        'storage' => { 'boxes' => 1_200, 'tex_size' => 4_096, 'max_tex' => 24 },
-        'target_mb' => 500,
-        'fps_s' => 2.0, 'iters' => 3, 'wave_s' => 8.0
-      },
-      'medium' => {
-        'targets' => { 'instances' => 2_304, 'triangles' => 389_000, 'file_mb' => 500 },
-        'diverse' => { 'grid' => 24, 'leaves' => 4, 'leaf_defs' => 32, 'asm_defs' => 8 },
-        'poly' => { 'n' => 60, 'segments' => 36 },
-        'wave' => { 'grid' => 48 },
-        'tools' => { 'draw' => 480, 'pushpull' => 48, 'inst' => 480,
-                     'followme' => 12, 'intersect' => 24, 'paint' => 480 },
-        'storage' => { 'boxes' => 2_000, 'tex_size' => 4_096, 'max_tex' => 24 },
-        'target_mb' => 500,
-        'fps_s' => 2.0, 'iters' => 2, 'wave_s' => 9.0
-      },
-      'large' => {
-        'targets' => { 'instances' => 8_192, 'triangles' => 691_000, 'file_mb' => 500 },
-        'diverse' => { 'grid' => 32, 'leaves' => 8, 'leaf_defs' => 48, 'asm_defs' => 10 },
-        'poly' => { 'n' => 80, 'segments' => 36 },
-        'wave' => { 'grid' => 64 },
-        'tools' => { 'draw' => 800, 'pushpull' => 80, 'inst' => 800,
-                     'followme' => 16, 'intersect' => 32, 'paint' => 800 },
-        'storage' => { 'boxes' => 3_000, 'tex_size' => 4_096, 'max_tex' => 24 },
-        'target_mb' => 500,
-        'fps_s' => 2.0, 'iters' => 2, 'wave_s' => 10.0
-      }
+    #   storage: уникальных тел + шумовые текстуры 4096² до цели target_mb
+    #            (130 МБ: 3 текстуры по ~48 МБ; при 500 МБ генерация текстур
+    #            одна занимала ~2 минуты).
+    SUITE = {
+      'targets' => { 'instances' => 1_024, 'triangles' => 173_000, 'file_mb' => 130 },
+      'diverse' => { 'grid' => 16, 'leaves' => 4, 'leaf_defs' => 24, 'asm_defs' => 6 },
+      'poly' => { 'n' => 40, 'segments' => 36 },
+      'wave' => { 'grid' => 36 },
+      'tools' => { 'draw' => 240, 'pushpull' => 24, 'inst' => 240,
+                   'followme' => 8, 'intersect' => 16, 'paint' => 240 },
+      'storage' => { 'boxes' => 1_200, 'tex_size' => 4_096, 'max_tex' => 24 },
+      'target_mb' => 130,
+      'fps_s' => 2.0, 'iters' => 3, 'wave_s' => 8.0
     }.freeze
 
-    # Ключи, которые пользователь может переопределить (Настройки диалога).
-    OVERRIDABLE = %w[iters fps_s wave_s target_mb].freeze
+    # Имя «профиля» в отчётах (один набор — одно имя; сравнение прогонов
+    # и имя baseline-файла завязаны на него).
+    SUITE_PROFILE = 'suite'
 
-    STORAGE_NOTE = 'тест файла ~500 МБ: сборка и сохранение занимают несколько ' \
-                   'минут, нужно ~1,5 ГБ свободного места и заметная память; ' \
-                   'во время сохранения/открытия UI кратко блокируется'.freeze
+    SUITE_NOTE = 'тест файла ~130 МБ: генерация текстур и сохранение занимают ' \
+                 'большую часть минуты прогона, нужно ~0,5 ГБ свободного места; ' \
+                 'во время сохранения/открытия UI кратко блокируется'.freeze
 
-    PROFILE_WARNINGS = {
-      'small' => "Полный прогон включает #{STORAGE_NOTE}.",
-      'medium' => "Нагрузка выше small; #{STORAGE_NOTE}.",
-      'large' => "Самый тяжёлый профиль (~8 тыс. инстансов, ~690 тыс. треугольников, " \
-                 "волна 64×64); #{STORAGE_NOTE}.",
-      'custom' => 'Пользовательский профиль: нагрузка определяется вашими параметрами.'
-    }.freeze
+    SUITE_WARNING = "Полный прогон занимает ~1 минуту. #{SUITE_NOTE}.".freeze
 
     class << self
       attr_reader :tool
@@ -157,37 +136,18 @@ module Dn1supBenchmark
         @cancel_requested == true
       end
 
-      # -- параметры профилей ------------------------------------------------------
+      # -- параметры набора ---------------------------------------------------------
 
-      def profile_params(profile, overrides = nil)
-        base = PROFILES[profile]
-        if base.nil? && profile != 'custom'
-          raise ArgumentError, "неизвестный профиль: #{profile}"
-        end
-        if base.nil? && !overrides.is_a?(Hash)
-          raise ArgumentError, 'профилю custom нужен полный набор параметров'
-        end
-
-        params = base ? deep_copy(base) : deep_copy(overrides)
-        if base && overrides.is_a?(Hash)
-          overrides.each do |k, v|
-            params[k] = v if OVERRIDABLE.include?(k)
-          end
-        end
-        params['profile'] = profile
-        params
-      end
-
-      def profile_warning(profile)
-        PROFILE_WARNINGS[profile]
+      def suite_params
+        deep_copy(SUITE).merge('profile' => SUITE_PROFILE)
       end
 
       # -- план прогона --------------------------------------------------------------
 
-      def steps(profile, overrides = nil)
-        profile_params(profile, overrides) # валидация профиля до старта
+      def steps
+        suite_params # копия — заодно прогрев Marshal (валидация константы)
         [
-          { 'kind' => 'begin', 'profile' => profile, 'overrides' => overrides, 'label' => 'Инициализация' },
+          { 'kind' => 'begin', 'label' => 'Инициализация' },
           { 'kind' => 'scene', 'scene' => 'diverse', 'category' => 'modeling',
             'label' => 'Моделирование: сборка сложной модели + правка/обход/расформирование' },
           { 'kind' => 'fps', 'id' => 'fps_components_static', 'mode' => 'static', 'category' => 'viewport',
@@ -211,20 +171,19 @@ module Dn1supBenchmark
           { 'kind' => 'wave', 'id' => 'wave_animation', 'category' => 'animation',
             'name' => 'Волна: анимация + полный оборот камеры (FPS)' },
           { 'kind' => 'scene', 'scene' => 'storage', 'category' => 'storage',
-            'label' => 'Файл: сборка модели ~500 МБ (геометрия + текстуры), сохранение ×2' },
-          { 'kind' => 'storage_open', 'category' => 'storage', 'label' => 'Файл: открытие ~500 МБ' },
+            'label' => 'Файл: сборка модели ~130 МБ (геометрия + текстуры), сохранение ×2' },
+          { 'kind' => 'storage_open', 'category' => 'storage', 'label' => 'Файл: открытие ~130 МБ' },
           { 'kind' => 'finish', 'label' => 'Отчёт' }
         ]
       end
 
       # Краткое описание плана для UI (без исполнения).
-      def plan_preview(profile, overrides = nil)
-        params = profile_params(profile, overrides)
+      def plan_preview
         {
-          'profile' => profile,
-          'params' => params,
-          'warning' => profile_warning(profile),
-          'steps' => steps(profile, overrides).map do |s|
+          'profile' => SUITE_PROFILE,
+          'params' => suite_params,
+          'warning' => SUITE_WARNING,
+          'steps' => steps.map do |s|
             { 'kind' => s['kind'], 'label' => s['label'] || s['name'], 'category' => s['category'] }
           end
         }
@@ -234,7 +193,7 @@ module Dn1supBenchmark
 
       def perform(step)
         case step['kind']
-        when 'begin'        then begin_run(step['profile'], step['overrides'])
+        when 'begin'        then begin_run
         when 'scene'        then open_scene(step['scene'])
         when 'fps'          then fps_start(step)
         when 'wave'         then wave_start(step)
@@ -244,11 +203,13 @@ module Dn1supBenchmark
         end
       ensure
         # Шаги, трогающие модель, обязаны остаться на модели прогона.
-        guard_model! if %w[scene fps wave storage_open].include?(step['kind'])
+        # storage_open сам переключает модели (тест файла) и охраняется
+        # сравнением путей внутри тиков.
+        guard_model! if %w[scene fps wave].include?(step['kind'])
       end
 
-      def begin_run(profile, overrides = nil)
-        params = profile_params(profile, overrides)
+      def begin_run
+        params = suite_params
         model = Sketchup.active_model
         raise 'нет активной модели' if model.nil?
 
@@ -257,15 +218,15 @@ module Dn1supBenchmark
         @run_model = model
         @baseline_entities = model.entities.size
         @state = {
-          'profile' => profile,
+          'profile' => SUITE_PROFILE,
           'params' => params,
-          'meta' => Environment.context(profile, params),
+          'meta' => Environment.context(SUITE_PROFILE, params),
           'results' => [],
           'scene' => nil,
           'scene_info' => nil,
           'log' => []
         }
-        log_line("прогон начат (#{profile})")
+        log_line("прогон начат (набор v#{SUITE_VERSION}, ~1 минута)")
         begin
           File.delete(File.join(PngGen.temp_root, 'run_heartbeat.log'))
         rescue StandardError
@@ -1012,7 +973,7 @@ module Dn1supBenchmark
       end
 
       # ==========================================================================
-      # 5. STORAGE — файл ~500 МБ: сборка, калибровка, сохранение ×2, открытие
+      # 5. STORAGE — файл ~130 МБ: сборка, калибровка, сохранение ×2, открытие
       # ==========================================================================
       # Модель собирается в ОПРЕДЕЛЕНИЕ dn1_storage текущей модели (внутри
       # undo-операции сцены; без инстансов — вьюпорт не нагружается) и
@@ -1031,6 +992,8 @@ module Dn1supBenchmark
         st['jobs'] << [:sync, -> {
           sg = st['storage']
           @state['scene_info'] = { 'path' => sg['path'], 'size' => sg['bytes'] }
+          log_line("storage: сцена завершена, scene_info.path=" +
+                   (sg['path'] ? File.basename(sg['path']) : 'nil'))
           st['result'] = "ok: storage (#{(sg['bytes'] / 1_048_576.0).round} МБ)"
         }]
       end
@@ -1038,6 +1001,14 @@ module Dn1supBenchmark
       def storage_setup(st, model, p)
         target_mb = p['target_mb'].to_f
         dir = PngGen.mkdir_p(File.join(PngGen.temp_root, 'storage'))
+        # Уборка больших файлов прошлых прогонов (файл может остаться после
+        # аварийного стопа — блокировка файловой системы мешает удалить его
+        # сразу после открытия).
+        Dir.glob(File.join(dir, 'big_*.skp')).each do |f|
+          File.delete(f)
+        rescue StandardError
+          nil
+        end
         path = File.join(dir, "big_#{Time.now.strftime('%Y%m%d-%H%M%S')}.skp")
         need = (target_mb * 1_048_576 * 2.2).round
         free = disk_free_bytes(dir)
@@ -1045,10 +1016,10 @@ module Dn1supBenchmark
           msg = "недостаточно места на диске: свободно #{(free / 1_048_576.0).round} МБ, " \
                 "нужно ~#{(need / 1_048_576.0).round} МБ"
           log_line("storage: #{msg}")
-          add_result('storage', 'storage_save', 'Сохранение файла ~500 МБ', 'ms', [],
+          add_result('storage', 'storage_save', 'Сохранение файла ~130 МБ', 'ms', [],
                      status: 'failed',
                      params: { 'error' => msg }, diagnostics: [diag_hash(RuntimeError.new(msg))])
-          add_result('storage', 'storage_open', 'Открытие файла ~500 МБ', 'ms', [],
+          add_result('storage', 'storage_open', 'Открытие файла ~130 МБ', 'ms', [],
                      status: 'failed',
                      params: { 'error' => msg }, diagnostics: [diag_hash(RuntimeError.new(msg))])
           st['storage'] = { 'path' => nil, 'bytes' => 0 }
@@ -1117,7 +1088,7 @@ module Dn1supBenchmark
         log_line("storage: +1 текстура = #{mb_str(per_tex)} → #{mb_str(size1)}")
         return if size1 >= target * 0.9 || per_tex <= 0
 
-        more = ((target - size1) / per_tex).ceil
+        more = (((target - size1).to_f / per_tex)).ceil
         more = [more, sp['max_tex'] - sg['tex']].min
         return unless more.positive?
 
@@ -1204,76 +1175,146 @@ module Dn1supBenchmark
 
       # Открытие собранного файла (отдельный шаг): сцена уже закрыта, файл
       # открывается в новой вкладке, валидируется и закрывается без сохранения.
+      # Sketchup.open_file на SU2024+ АСИНХРОНЕН В ЛЮБОЙ перегрузке: вызов
+      # возвращается до завершения загрузки, активная модель меняется позже
+      # (для файла ~144 МБ с текстурами — десятки секунд). Поэтому шаг работает
+      # тиками: секвенсор опрашивает storage_open_tick повторяющимся таймером,
+      # тайминг попытки — от вызова open_file до смены активной модели.
+      OPEN_TIMEOUT_S = 300.0
+
       def storage_open_tests
         return 'нет активного прогона' if @state.nil?
 
         info = @state['scene_info'] || {}
         if info['path'].nil?
-          return add_skipped('storage', 'storage_open', 'Открытие файла ~500 МБ',
+          return add_skipped('storage', 'storage_open', 'Открытие файла ~130 МБ',
                              cancelled? ? 'отменено пользователем' : 'файл не был собран',
                              status: cancelled? ? 'cancelled' : 'skipped')
         end
 
-        path = info['path']
-        size = info['size'].to_i
-        close_scene # откат сборки: файл уже на диске
-        model = Sketchup.active_model
-        raise 'нет активной модели' if model.nil?
+        if @storage_open.nil?
+          close_scene # откат сборки: файл уже на диске
+          model = Sketchup.active_model
+          raise 'нет активной модели' if model.nil?
 
-        orig = model
-        opens = []
-        diag = []
-        val = []
-        iters = [@state['params']['iters'], 2].min
-        begin
-          iters.times do |i|
-            raise Cancelled if cancelled?
+          @storage_open = {
+            'orig' => model, 'path' => info['path'], 'size' => info['size'].to_i,
+            'opens' => [], 'diag' => [], 'val' => [],
+            'iters' => [@state['params']['iters'], 2].min,
+            'i' => 0, 't0' => nil, 'waiting' => false, 'last_seen' => nil
+          }
+          log_line("storage_open: жду загрузку (асинхронно, до #{OPEN_TIMEOUT_S.to_i} с на попытку)")
+        end
+        storage_open_tick
+      end
 
-            t0 = Dn1supBenchmark.monotonic
-            open_file_status(path)
-            t1 = Dn1supBenchmark.monotonic
-            opened = Sketchup.active_model
-            if opened.nil? || opened.equal?(orig)
-              val << "открытие #{i}: open_file не создал новую модель"
-              next
-            end
-            n = opened.entities.size
-            val << "открытие #{i}: сущностей #{n} (ожидали > 0)" unless n.positive?
-            opened.close(true)
-            opens << (t1 - t0)
-          rescue StandardError => e
-            diag << diag_hash(e)
-          end
-          med_s = median(opens)
-          mbps = med_s && med_s.positive? ? (size / 1_048_576.0) / med_s : nil
-          add_result('storage', 'storage_open',
-                     "Открытие файла #{(size / 1_048_576.0).round} МБ", 'ms', opens,
-                     ops: 1, file_size: size,
-                     params: { 'target_mb' => @state['params']['target_mb'],
-                               'op' => 'Sketchup.open_file + close(true)',
-                               'cache' => 'файловый кэш ОС тёплый; «холодный» запуск не заявляется',
-                               'note' => 'открытие атомарно — UI блокируется на время загрузки' },
-                     extra: { 'mb_per_s' => mbps&.round(1),
-                              'file_mb' => (size / 1_048_576.0).round(1) },
-                     diagnostics: diag, validation_errors: val,
-                     status: status_for(opens, diag, val))
-          log_line("storage: открытие #{mb_str(size)} (#{opens.size} повторов)")
-        ensure
-          cur = Sketchup.active_model rescue nil
-          if cur && !cur.equal?(orig)
-            begin
-              cur.close(true)
-            rescue StandardError
-              nil
-            end
-          end
-          begin
-            File.delete(path) if File.exist?(path)
-          rescue StandardError
-            nil
+      # Тик опроса (секвенсор, повторяющийся таймер). :in_progress — ждём
+      # загрузку/пробуем дальше; String — шаг завершён.
+      def storage_open_tick
+        so = @storage_open
+        return 'нет активного шага открытия' if so.nil?
+
+        if cancelled?
+          so['val'] << 'отменено пользователем' if so['opens'].empty?
+          return storage_open_finish('cancelled')
+        end
+
+        cur = Sketchup.active_model
+        cur_path = cur&.path.to_s
+        if cur_path != so['last_seen']
+          so['last_seen'] = cur_path
+          log_line("storage_open: активная модель — #{cur_path.empty? ? '(без имени)' : File.basename(cur_path)}")
+        end
+
+        if so['waiting']
+          # ВАЖНО: SU2025 может ПЕРЕИСПОЛЬЗОВАТЬ объект модели — безымянная
+          # вкладка «становится» открытым файлом (тот же Ruby-объект, путь
+          # меняется). Поэтому успех определяем ТОЛЬКО по пути, не по
+          # идентичности объекта.
+          if !cur.nil? && File.basename(cur_path.downcase) == File.basename(so['path'].downcase)
+            # Файл теста открылся: замер от вызова open_file до смены модели.
+            so['opens'] << (Dn1supBenchmark.monotonic - so['t0'])
+            n = cur.entities.size
+            so['val'] << "открытие #{so['i']}: сущностей #{n} (ожидали > 0)" unless n.positive?
+            storage_close_tab(so)
+            so['waiting'] = false
+            so['i'] += 1
+          elsif Dn1supBenchmark.monotonic - so['t0'] > OPEN_TIMEOUT_S
+            so['val'] << "открытие #{so['i']}: файл не открылся за #{OPEN_TIMEOUT_S.to_i} с"
+            so['waiting'] = false
+            so['i'] += 1
+          else
+            return :in_progress # загрузка ещё идёт — тик секвенсора вернётся
           end
         end
-        'ok: storage_open'
+
+        while so['i'] < so['iters']
+          so['t0'] = Dn1supBenchmark.monotonic
+          begin
+            open_file_status(so['path'])
+            so['waiting'] = true
+            return :in_progress
+          rescue StandardError => e
+            so['diag'] << diag_hash(e)
+            so['i'] += 1
+          end
+        end
+
+        storage_open_finish
+      end
+
+      def same_path?(a, b)
+        a.to_s.tr('\\', '/').downcase == b.to_s.tr('\\', '/').downcase
+      end
+
+      # Закрыть вкладку файла теста (только по имени файла — модель
+      # пользователя не трогаем; объект мог переиспользоваться — см. выше).
+      def storage_close_tab(so)
+        cur = Sketchup.active_model
+        return if cur.nil?
+        return unless File.basename(cur.path.to_s.downcase) == File.basename(so['path'].downcase)
+
+        cur.close(true)
+        nil
+      end
+
+      def storage_open_finish(status = nil)
+        so = @storage_open
+        med_s = median(so['opens'])
+        size = so['size']
+        mbps = med_s && med_s.positive? ? (size / 1_048_576.0) / med_s : nil
+        add_result('storage', 'storage_open',
+                   "Открытие файла #{(size / 1_048_576.0).round} МБ", 'ms', so['opens'],
+                   ops: 1, file_size: size,
+                   params: { 'target_mb' => @state['params']['target_mb'],
+                             'op' => 'Sketchup.open_file (async) + close(true)',
+                             'open_file' => 'асинхронный: тайминг от вызова до смены активной модели (тики 0.3 с)',
+                             'cache' => 'файловый кэш ОС тёплый; «холодный» запуск не заявляется',
+                             'note' => 'открытие атомарно — UI блокируется на время загрузки' },
+                   extra: { 'mb_per_s' => mbps&.round(1),
+                            'file_mb' => (size / 1_048_576.0).round(1) },
+                   diagnostics: so['diag'], validation_errors: so['val'],
+                   status: status || status_for(so['opens'], so['diag'], so['val']))
+        log_line("storage: открытие #{mb_str(size)} (#{so['opens'].size} повторов)")
+        storage_close_tab(so) # страховка: вкладка теста не должна остаться
+        begin
+          File.delete(so['path']) if File.exist?(so['path'])
+        rescue StandardError
+          nil
+        end
+        @storage_open = nil
+        status == 'cancelled' ? 'cancelled: storage_open' : 'ok: storage_open'
+      end
+
+      # Асинхронный старт загрузки (см. storage_open_tests).
+      def open_file_status(path)
+        if Sketchup.version.to_i >= 24
+          Sketchup.open_file(path, with_status: true)
+        else
+          Sketchup.open_file(path)
+        end
+      rescue ArgumentError
+        Sketchup.open_file(path)
       end
 
       def mb_str(bytes)

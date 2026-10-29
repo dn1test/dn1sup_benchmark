@@ -9,11 +9,11 @@
 #   общий балл   = 1000 × взвешенное геометрическое среднее категорий
 #                  (веса ниже; веса доступных категорий перенормируются).
 # Итог: 1000 ≈ конфигурация из baseline-файла. Шкала условная, привязана
-# к профилю и набору тестов; это НЕ рейтинг SketchUp и НЕ сравнение между
-# разными профилями.
+# к набору тестов; это НЕ рейтинг SketchUp и НЕ сравнение между разными
+# наборами.
 #
-# Балл вычисляется только для профилей, у которых есть baseline-файл
-# (baseline-<profile>-v4.json рядом с кодом). Пропущенные/упавшие тесты
+# Балл вычисляется, только если рядом с кодом есть baseline-файл
+# (baseline-<profile>-v5.json, profile = 'suite'). Пропущенные/упавшие тесты
 # дают статус partial с перечнем недостающих (не подменяются нулями).
 # =============================================================================
 
@@ -34,7 +34,7 @@ module Dn1supBenchmark
       'storage' => 0.25
     }.freeze
 
-    # Тесты, входящие в балл (канонический набор suite v4). Справочные
+    # Тесты, входящие в балл (канонический набор suite v5). Справочные
     # времена сборки (model_build входит как операция моделирования;
     # storage_build и wave_build — нет: это setup, а не измеряемая операция).
     INCLUDED = {
@@ -57,8 +57,8 @@ module Dn1supBenchmark
         if baseline.nil?
           return { 'score_version' => SCORE_VERSION, 'profile' => profile,
                    'status' => 'unavailable', 'overall' => nil,
-                   'reason' => "нет базовых значений для профиля «#{profile}» " \
-                               '(балл публикуется только для профилей с baseline-файлом)' }
+                   'reason' => "нет базовых значений для набора «#{profile}» " \
+                               '(балл публикуется только при наличии baseline-файла)' }
         end
 
         by_id = {}
@@ -135,7 +135,7 @@ module Dn1supBenchmark
       end
 
       def load_baseline(profile)
-        path = File.join(Dn1supBenchmark::PLUG_ROOT, "baseline-#{profile}-v4.json")
+        path = File.join(Dn1supBenchmark::PLUG_ROOT, "baseline-#{profile}-v5.json")
         return nil unless File.exist?(path)
 
         JSON.parse(File.read(path))

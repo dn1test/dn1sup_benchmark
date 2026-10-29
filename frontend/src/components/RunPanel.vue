@@ -8,9 +8,10 @@ const logEl = ref(null)
 const loadSummary = computed(() => {
   const p = state.plan
   if (!p) return ''
-  return 'Профиль ' + p.profile + ': ' + (p.steps ? p.steps.length : 0) +
-    ' шагов, файл ~' + ((p.params && p.params.target_mb) || '?') +
-    ' МБ (несколько минут сборки и сохранения).'
+  return 'Набор v' + (state.overview && state.overview.environment
+    ? state.overview.environment.test_suite_version : '?') + ': ' +
+    (p.steps ? p.steps.length : 0) + ' шагов, файл ~' +
+    ((p.params && p.params.target_mb) || '?') + ' МБ, полный прогон ~1 минута.'
 })
 
 const logLineCls = {
@@ -35,7 +36,7 @@ watch(() => state.runLog.length, async () => {
     <div v-if="!state.running" class="shrink-0">
       <div class="rounded-lg bg-slate-200/60 px-2.5 py-1.5 text-[11px] leading-4 text-slate-600 dark:bg-slate-800/60 dark:text-slate-300">
         <b>Временно создаёт и откатывает</b> геометрию в текущей модели: сохраните модель
-        и не переключайте вкладки до конца прогона. Тест ~500 МБ собирает файл во
+        и не переключайте вкладки до конца прогона. Тест файла (~130 МБ) собирает файл во
         временную папку, открывает и удаляет; UI на время кратко блокируется.
         <div class="mt-1">{{ loadSummary }}</div>
       </div>
