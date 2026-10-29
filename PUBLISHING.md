@@ -27,4 +27,6 @@ Dev-цикл в живом SketchUp — через MCP sketchup-dev с пара�
 `<dir>/<id>/`): `ext_check` → `ext_install` → `ext_reload` → `ext_test`
 (зелёные тесты обязательны). Локальный юнит-прогон:
 `ruby -I dn1sup_benchmark/test/stubs dn1sup_benchmark/test/run_local.rb`.
-У расширения нет frontend-сборки — HTML/CSS/JS панели вендорятся как есть.
+UI панели — Vue 3 + Tailwind CSS, сборка в один самодостаточный
+`ui/html/index.html`: `npm --prefix frontend run build` (Vite + vite-plugin-singlefile,
+`frontend/` и `node_modules` в rbz не попадают — их исключает `tools/pack.rb`).

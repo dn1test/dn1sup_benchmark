@@ -1,2 +1,4 @@
 *.rbz
 .zcode/
+frontend/node_modules/
+frontend/dist/

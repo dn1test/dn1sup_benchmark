@@ -10,9 +10,25 @@ dn1sup_benchmark/
   main.rb                неймспейс Dn1supBenchmark: setup!/unload!/about
   command.rb             команды (пример: create_sample_box с undo-циклом)
   dialog.rb              HtmlDialog (если запрошен)
+  ui/html/index.html     панель (сборка Vue 3 + Tailwind — self-contained)
   test/test_helper.rb    мини-харнесс (run! / assert / skip)
   test/main_test.rb      тесты: юнит + живые (внутри SketchUp)
+frontend/                исходники UI (Vue 3 + Tailwind CSS 4 + Vite)
 ```
+
+## Сборка UI панели
+
+Панель — Vue 3 + Tailwind CSS 4, собирается в один самодостаточный
+`ui/html/index.html` (JS/CSS инлайном; мост Ruby ↔ JS не менялся).
+
+```
+npm --prefix frontend install   # один раз
+npm --prefix frontend run dev   # разработка в браузере на мок-данных (симуляция прогона)
+npm --prefix frontend run build # сборка + копия в dn1sup_benchmark/ui/html/index.html
+```
+
+`frontend/`, `node_modules` и `frontend/dist` в rbz не попадают
+(исключены в `tools/pack.rb`).
 
 ## Разработка с живой обратной связью (MCP sketchup-dev)
 
