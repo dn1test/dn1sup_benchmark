@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/dn1test/dn1sup_benchmark/schemas/result-schema-v1.json",
   "title": "dn1sup_benchmark run report (schema v1)",
-  "description": "Отчёт прогона бенчмарка dn1sup_benchmark 0.2.0+. Отсутствующие показатели — null (не нули).",
+  "description": "Отчёт прогона бенчмарка dn1sup_benchmark 0.5.0+ (suite v4: пять категорий ТЗ). Отсутствующие показатели — null (не нули).",
   "type": "object",
   "required": ["meta", "results"],
   "properties": {
@@ -81,17 +81,17 @@
       "properties": {
         "id": {
           "type": "string",
-          "description": "стабильный id теста (RUBY-01, API-01…06, DOC-01/02, scene_gen_*, fps_*, …)"
+          "description": "стабильный id теста (model_*, tool_*, fps_*, fps_wave_orbit, wave_update_ms, storage_*)"
         },
         "name": { "type": "string" },
         "group": {
           "type": "string",
-          "enum": ["ruby", "api", "documents", "graphics", "scene_gen", "viewport", "hierarchy", "editing", "textures"],
-          "description": "категория (для новых тестов совпадает с category; легаси-значения — для отображения)"
+          "enum": ["modeling", "tools", "viewport", "animation", "storage"],
+          "description": "категория таксономии ТЗ (совпадает с category)"
         },
         "category": {
           "type": "string",
-          "enum": ["ruby", "api", "documents", "graphics", "scene_gen", "viewport", "hierarchy", "editing", "textures"]
+          "enum": ["modeling", "tools", "viewport", "animation", "storage"]
         },
         "test_version": { "type": "string" },
         "unit": { "type": ["string", "null"], "enum": ["ms", "fps", null] },

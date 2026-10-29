@@ -63,19 +63,17 @@
       <div class="col-4">
         <label class="form-label small mb-1">Профиль нагрузки</label>
         <select class="form-select form-select-sm" id="profile-select">
-          <option value="small">small — 10 тыс. рёбер / 100 инстансов</option>
-          <option value="medium">medium — 100 тыс. / 1 000</option>
-          <option value="large">large — 500 тыс. / 10 000 (тяжёлый)</option>
+          <option value="small">small — ~1 тыс. инстансов / файл 500 МБ</option>
+          <option value="medium">medium — ~2,3 тыс. / файл 500 МБ</option>
+          <option value="large">large — ~8,2 тыс. инстансов, ~690 тыс. треугольников</option>
           <option value="custom">custom — свои параметры</option>
         </select>
         <div id="custom-fields" class="d-none mt-2 small">
           <div class="row g-1">
-            <div class="col-6"><label class="form-label mb-0">Сетка n×n</label><input class="form-control form-control-sm" id="cu-grid-n" value="70"></div>
-            <div class="col-6"><label class="form-label mb-0">Инстансов grid²</label><input class="form-control form-control-sm" id="cu-comp-grid" value="10"></div>
-            <div class="col-6"><label class="form-label mb-0">Контуров API-01</label><input class="form-control form-control-sm" id="cu-loops" value="2500"></div>
-            <div class="col-6"><label class="form-label mb-0">Определений API-03</label><input class="form-control form-control-sm" id="cu-defs" value="10"></div>
-            <div class="col-6"><label class="form-label mb-0">Боксов текстур</label><input class="form-control form-control-sm" id="cu-boxes" value="24"></div>
-            <div class="col-6"><label class="form-label mb-0">Граней в оп. API-06</label><input class="form-control form-control-sm" id="cu-tx" value="100"></div>
+            <div class="col-6"><label class="form-label mb-0">Сетка сборок (n²)</label><input class="form-control form-control-sm" id="cu-diverse" value="16"></div>
+            <div class="col-6"><label class="form-label mb-0">Цилиндров n²</label><input class="form-control form-control-sm" id="cu-poly" value="40"></div>
+            <div class="col-6"><label class="form-label mb-0">Волна: полотно n²</label><input class="form-control form-control-sm" id="cu-wave" value="36"></div>
+            <div class="col-6"><label class="form-label mb-0">Файл, МБ</label><input class="form-control form-control-sm" id="cu-mb" value="500"></div>
           </div>
           <div class="text-secondary mt-1">Остальные параметры берутся из профиля small.</div>
         </div>
@@ -97,8 +95,9 @@
     <div id="run-start-block">
       <div class="alert alert-secondary small py-2 px-3">
         Бенчмарк <b>временно создаёт и откатывает</b> геометрию в текущей модели. Сохраните модель,
-        закройте лишние вкладки и не переключайте модели до конца прогона. Файловые тесты (DOC)
-        открывают и закрывают контрольную модель во временной папке.
+        закройте лишние вкладки и не переключайте модели до конца прогона. Тест файла ~500 МБ
+        собирает модель во временную папку, открывает её в отдельной вкладке и удаляет;
+        на время сохранения/открытия большого файла UI кратко блокируется.
         <div class="mt-1" id="run-load-summary"></div>
       </div>
       <button class="btn btn-primary" id="btn-start" onclick="bench.startRun()">Запустить</button>
@@ -147,10 +146,10 @@
       <input class="form-control form-control-sm mb-2" id="st-iters" placeholder="напр. 3">
       <label class="form-label small mb-0">Секунд на FPS-замер (пусто = по профилю)</label>
       <input class="form-control form-control-sm mb-2" id="st-fps" placeholder="напр. 2.0">
-      <div class="form-check mb-2">
-        <input class="form-check-input" type="checkbox" id="st-doc" checked>
-        <label class="form-check-label small" for="st-doc">Файловые тесты DOC-01/02 (открывают контрольную модель во вкладке)</label>
-      </div>
+      <label class="form-label small mb-0">Секунд на волну (пусто = по профилю)</label>
+      <input class="form-control form-control-sm mb-2" id="st-wave" placeholder="напр. 8">
+      <label class="form-label small mb-0">Цель файла, МБ (пусто = 500)</label>
+      <input class="form-control form-control-sm mb-2" id="st-mb" placeholder="напр. 500">
       <button class="btn btn-primary btn-sm" onclick="bench.saveSettings()">Сохранить</button>
     </div></div>
   </div>

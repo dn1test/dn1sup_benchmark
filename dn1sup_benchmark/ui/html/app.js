@@ -109,21 +109,27 @@
     var o = {};
     var iters = $('st-iters').value.trim();
     var fps = $('st-fps').value.trim();
+    var wave = $('st-wave').value.trim();
+    var mb = $('st-mb').value.trim();
     if (iters) o.iters = parseInt(iters, 10);
     if (fps) o.fps_s = parseFloat(fps);
-    o.doc_enabled = $('st-doc').checked;
+    if (wave) o.wave_s = parseFloat(wave);
+    if (mb) o.target_mb = parseFloat(mb);
     if (state.profile === 'custom') {
-      o.grid = { n: parseInt($('cu-grid-n').value, 10) || 70 };
-      o.nested = { depth: 6, items: 4 };
-      o.textured = { boxes: parseInt($('cu-boxes').value, 10) || 24 };
-      o.api01_loops = parseInt($('cu-loops').value, 10) || 2500;
-      o.api02_groups = 100;
-      o.api03_defs = parseInt($('cu-defs').value, 10) || 10;
-      o.api03_instances = (parseInt($('cu-comp-grid').value, 10) || 10) * (parseInt($('cu-comp-grid').value, 10) || 10);
-      o.api05_objects = 100;
-      o.api06_faces = parseInt($('cu-tx').value, 10) || 100;
-      o.pushpull = 8; o.move = 10; o.add_faces = 8; o.tex_apply = 60;
-      o.targets = { edges: o.api01_loops * 4, instances: o.api03_instances };
+      var dvg = parseInt($('cu-diverse').value, 10) || 16;
+      var poly = parseInt($('cu-poly').value, 10) || 40;
+      var wvg = parseInt($('cu-wave').value, 10) || 36;
+      var tmb = parseFloat($('cu-mb').value) || 500;
+      o.diverse = { grid: dvg, leaves: 4, leaf_defs: 24, asm_defs: 6 };
+      o.poly = { n: poly, segments: 36 };
+      o.wave = { grid: wvg };
+      o.tools = { draw: 240, pushpull: 24, inst: 240, followme: 8, intersect: 16, paint: 240 };
+      o.storage = { boxes: 1200, tex_size: 4096, max_tex: 24 };
+      o.target_mb = tmb;
+      o.fps_s = o.fps_s || 2.0;
+      o.iters = o.iters || 3;
+      o.wave_s = o.wave_s || 8.0;
+      o.targets = { instances: dvg * dvg * 4, file_mb: tmb };
     }
     return o;
   }
@@ -136,18 +142,21 @@
 
     var pr = p.params || {};
     var tg = pr.targets || {};
+    var dv = pr.diverse || {};
+    var po = pr.poly || {};
+    var wv = pr.wave || {};
     $('plan-params').innerHTML =
-      'Цели: ~' + esc(tg.edges) + ' рёбер, ~' + esc(tg.instances) + ' инстансов; ' +
-      'сетка ' + esc((pr.grid || {}).n) + '×' + esc((pr.grid || {}).n) + '; ' +
-      'повторов: ' + esc(pr.iters) + '; FPS-замер: ' + esc(pr.fps_s) + ' с; ' +
-      'DOC-тесты: ' + (pr.doc_enabled ? 'вкл' : 'выкл');
+      'Моделирование: ' + esc(dv.grid) + '² сборок × ' + esc(dv.leaves) + ' листьев (~' + esc(tg.instances) + ' инстансов); ' +
+      'вьюпорт: ' + esc(po.n) + '² цилиндров (' + esc(po.segments) + ' сегм., ~' + Math.round(parseInt(po.n, 10) * parseInt(po.n, 10) * (2 * parseInt(po.segments, 10) + 2) / 1000) + ' тыс. треугольников); ' +
+      'волна: ' + esc(wv.grid) + '² кубов, ' + esc(pr.wave_s) + ' с; ' +
+      'файл: ~' + esc(pr.target_mb) + ' МБ; повторы: ' + esc(pr.iters) + '; FPS-замер: ' + esc(pr.fps_s) + ' с.';
     $('plan-steps').innerHTML =
       '<tr><th>Шаг</th><th>Категория</th></tr>' +
       p.steps.map(function (s) {
         return '<tr><td>' + esc(s.label || s.kind) + '</td><td>' + esc(s.category || '—') + '</td></tr>';
       }).join('');
-    $('run-load-summary').textContent = 'Профиль ' + p.profile + ': ~' + esc(tg.edges) +
-      ' рёбер, ~' + esc(tg.instances) + ' инстансов, ' + p.steps.length + ' шагов.';
+    $('run-load-summary').textContent = 'Профиль ' + p.profile + ': ' + p.steps.length +
+      ' шагов, файл ~' + esc(pr.target_mb) + ' МБ (несколько минут сборки и сохранения).';
   }
 
   /* ---------------- Запуск ---------------- */
@@ -337,7 +346,8 @@
           $('st-profile').value = payload.profile || 'small';
           $('st-iters').value = payload.iters || '';
           $('st-fps').value = payload.fps_s || '';
-          $('st-doc').checked = payload.doc_enabled !== false;
+          $('st-wave').value = payload.wave_s || '';
+          $('st-mb').value = payload.target_mb || '';
           state.profile = $('st-profile').value;
           $('profile-select').value = state.profile;
           $('custom-fields').classList.toggle('d-none', state.profile !== 'custom');

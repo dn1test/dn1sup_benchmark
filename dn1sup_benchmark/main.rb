@@ -26,6 +26,7 @@ end
 require File.join(File.dirname(__FILE__), 'png_gen.rb')
 require File.join(File.dirname(__FILE__), 'scenes.rb')
 require File.join(File.dirname(__FILE__), 'fps_tool.rb')
+require File.join(File.dirname(__FILE__), 'wave_tool.rb')
 require File.join(File.dirname(__FILE__), 'environment.rb')
 require File.join(File.dirname(__FILE__), 'score.rb')
 require File.join(File.dirname(__FILE__), 'runner.rb')
@@ -34,7 +35,7 @@ require File.join(File.dirname(__FILE__), 'sequencer.rb')
 require File.join(File.dirname(__FILE__), 'command.rb')
 
 module Dn1supBenchmark
-  VERSION   = '0.4.0'.freeze
+  VERSION   = '0.5.0'.freeze
   PLUG_ROOT = File.dirname(__FILE__).freeze
   TOOLBAR_NAME = 'DN1Sup Benchmark'.freeze
   CMD_TOOLTIP  = 'DN1Sup Benchmark: панель'.freeze
@@ -156,8 +157,10 @@ module Dn1supBenchmark
 
     def about
       UI.messagebox("DN1Sup Benchmark v#{VERSION} (набор тестов v#{Runner::SUITE_VERSION})\n\n" \
-                    "Бенчмарк производительности SketchUp: чистый Ruby, API, файловые " \
-                    "операции, FPS вьюпорта. Отчёты и сравнение прогонов.\n\n" \
+                    "Пять категорий: моделирование сложной модели, инструменты SketchUp " \
+                    "(API-эквиваленты), FPS вьюпорта на тяжёлой сцене, волна из кубиков " \
+                    "100×100 мм с оборотом камеры, файл ~500 МБ (сохранение/загрузка). " \
+                    "Отчёты и сравнение прогонов.\n\n" \
                     "Отчёты: #{Report.report_dir}")
     end
 
@@ -206,13 +209,18 @@ module Dn1supBenchmark
         UI.messagebox('Нет активной модели — прогону нужна открытая модель.')
         return
       end
-      # Согласие пользователя (ТЗ §14): бенчмарк временно создаёт и откатывает
-      # геометрию в ТЕКУЩЕЙ модели. Подтверждение обязательно перед каждым
-      # прогоном; тяжёлые профили предупреждают дополнительно.
+      # Согласие пользователя: бенчмарк временно создаёт и откатывает
+      # геометрию в ТЕКУЩЕЙ модели; тест файла собирает ~500 МБ во временной
+      # папке (несколько минут, ~1,5 ГБ диска). Подтверждение обязательно
+      # перед каждым прогоном; профили предупреждают дополнительно.
       preview = "Профиль: #{profile}\nМодель: #{model.title}\n" \
-                "Повторов на тест: #{Runner.profile_params(profile, overrides)['iters']}\n\n" \
+                "Повторов на тест: #{Runner.profile_params(profile, overrides)['iters']}\n" \
+                "Файл: цель ~#{Runner.profile_params(profile, overrides)['target_mb']} МБ " \
+                "(сборка и сохранение — несколько минут)\n\n" \
                 'Бенчмарк временно создаёт и откатывает геометрию в текущей модели. ' \
-                'Сохраните модель и не переключайте вкладки до конца прогона.\n\nЗапустить?'
+                'Сохраните модель и не переключайте вкладки до конца прогона. ' \
+                'Волна видна во вьюпоре; большой файл открывается в отдельной вкладке ' \
+                'и удаляется.\n\nЗапустить?'
       if UI.messagebox(preview, UI::MB_OKCANCEL) != UI::IDOK
         return
       end

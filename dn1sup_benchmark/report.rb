@@ -18,11 +18,8 @@ require 'json'
 module Dn1supBenchmark
   module Report
     COLORS = {
-      'ruby' => '#5e81ac', 'api' => '#a3be8c', 'documents' => '#d08770',
-      'graphics' => '#b48ead',
-      # легаси-группы отчётов 0.1.0
-      'scene_gen' => '#5e81ac', 'viewport' => '#a3be8c', 'hierarchy' => '#ebcb8b',
-      'editing' => '#d08770', 'textures' => '#b48ead'
+      'modeling' => '#5e81ac', 'tools' => '#a3be8c', 'viewport' => '#b48ead',
+      'animation' => '#d08770', 'storage' => '#ebcb8b'
     }.freeze
 
     STATUS_LABELS = {
@@ -170,8 +167,11 @@ module Dn1supBenchmark
           b << "</ul>\n"
         end
         b << "<p class=\"muted\">Сгенерировано dn1sup_benchmark v#{meta['extension_version']} " \
-             "(набор тестов v#{meta['test_suite_version']}). Меньше мс — лучше; больше FPS — лучше. " \
-             "FPS — счётчик кадров Ruby-стороны, не GPU-счётчик.</p>\n</body>\n</html>\n"
+             "(набор тестов v#{meta['test_suite_version']}). Пять категорий: моделирование, " \
+             "инструменты (API-эквиваленты встроенных), FPS вьюпорта, волна из кубиков 100×100 мм, " \
+             "файл ~500 МБ. Меньше мс — лучше; больше FPS — лучше. " \
+             "FPS — счётчик кадров Ruby-стороны, не GPU-счётчик; Offset и Solid Tools " \
+             "не тестируются — Ruby-API отсутствует.</p>\n</body>\n</html>\n"
         b
       end
 
@@ -285,7 +285,9 @@ module Dn1supBenchmark
           out << "<td>#{esc(r['name'] || r['id'])}</td>"
           out << "<td>#{esc(STATUS_LABELS.fetch(r['status'], r['status'].to_s))}</td>"
           if val
-            out << "<td class=\"num\"><b>#{fmt(val, r['unit'])}</b></td>"
+            cell = "<b>#{fmt(val, r['unit'])}</b>"
+            cell << " <span class=\"muted\">#{r['mb_per_s']} МБ/с</span>" if r['mb_per_s']
+            out << "<td class=\"num\">#{cell}</td>"
             out << "<td class=\"num\">#{fmt(r['min_ms'] || r['min'], r['unit'])}</td>"
             out << "<td class=\"num\">#{fmt(r['max_ms'] || r['max'], r['unit'])}</td>"
             out << "<td class=\"num\">#{fmt(r['p95_ms'] || r['p95'], r['unit'])}</td>"

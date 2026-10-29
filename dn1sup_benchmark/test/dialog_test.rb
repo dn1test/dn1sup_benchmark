@@ -11,22 +11,24 @@ module Dn1supBenchmark::Test
 
   test 'dialog: plan_data отдаёт шаги и категории' do
     data = D.send(:plan_data, 'small', nil)
-    assert(data['steps'].size >= 12, 'полный план шагов (suite v3: 13 шагов)')
+    assert(data['steps'].size >= 12, 'полный план шагов (suite v4: 14 шагов)')
     assert(data['categories'].is_a?(Array) && !data['categories'].empty?, 'категории для фильтра')
     assert(data['params'].is_a?(Hash), 'параметры профиля')
   end
 
-  test 'dialog: plan_data предупреждение для large' do
-    assert(!D.send(:plan_data, 'large', nil)['warning'].nil?, 'предупреждение для large обязательно')
+  test 'dialog: plan_data предупреждение для всех профилей (файл ~500 МБ)' do
+    %w[small medium large].each do |profile|
+      assert(!D.send(:plan_data, profile, nil)['warning'].nil?, "предупреждение для #{profile} обязательно")
+    end
   end
 
   test 'dialog: run_results_data группирует результаты' do
     run = {
       'meta' => { 'sketchup_version' => '27.0', 'profile' => 'small', 'started_at' => 'x',
-                  'test_suite_version' => '2', 'ruby_version' => RUBY_VERSION, 'cpu' => 'T' },
+                  'test_suite_version' => '4', 'ruby_version' => RUBY_VERSION, 'cpu' => 'T' },
       'run' => { 'status' => 'completed' },
       'results' => [
-        { 'id' => 'RUBY-01', 'name' => 'Ruby', 'group' => 'ruby', 'status' => 'passed',
+        { 'id' => 'tool_draw', 'name' => 'Черчение', 'group' => 'tools', 'status' => 'passed',
           'unit' => 'ms', 'value' => 1.0, 'min_ms' => 1.0, 'max_ms' => 1.0, 'p95_ms' => nil,
           'repeat_count' => 3, 'ops_per_sec' => 9.0, 'entities' => nil, 'error' => nil,
           'higher_is_better' => false }
@@ -34,7 +36,7 @@ module Dn1supBenchmark::Test
     }
     out = D.send(:run_results_data, run)
     assert_equal(1, out['groups'].size)
-    assert_equal('RUBY-01', out['groups'].first['tests'].first['id'])
+    assert_equal('tool_draw', out['groups'].first['tests'].first['id'])
     assert_equal('completed', out['run']['status'])
   end
 
@@ -42,6 +44,7 @@ module Dn1supBenchmark::Test
     s = D.send(:load_settings)
     assert(s.is_a?(Hash))
     assert(s.key?('profile'), 'есть профиль')
-    assert(s.key?('doc_enabled'), 'есть флаг DOC')
+    assert(s.key?('wave_s'), 'есть длительность волны')
+    assert(s.key?('target_mb'), 'есть цель файла')
   end
 end

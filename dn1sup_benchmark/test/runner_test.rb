@@ -7,68 +7,79 @@ require_relative 'test_helper'
 module Dn1supBenchmark::Test
   R = Dn1supBenchmark::Runner
 
-  test 'PROFILES: small/medium/large с целями ТЗ, quick/full удалены' do
+  test 'PROFILES: small/medium/large с параметрами пяти категорий' do
     %w[small medium large].each do |p|
       prof = R::PROFILES[p]
       assert(prof, "нет профиля #{p}")
-      assert(prof['targets']['edges'].positive?, "#{p}: цель по рёбрам")
+      %w[diverse poly wave tools storage].each do |key|
+        assert(prof[key].is_a?(Hash), "#{p}: нет параметров #{key}")
+      end
+      assert(prof['target_mb'].to_f.positive?, "#{p}: цель файла")
       assert(prof['targets']['instances'].positive?, "#{p}: цель по инстансам")
     end
-    refute(R::PROFILES.key?('quick'), 'quick больше не существует')
-    refute(R::PROFILES.key?('full'), 'full больше не существует')
   end
 
   test 'profile_params: переопределяются только разрешённые ключи' do
-    base = R::PROFILES['small']['api01_loops']
-    p = R.profile_params('small', 'iters' => 7, 'api01_loops' => 1, 'zzz' => 2)
+    base = R::PROFILES['small']['storage']['boxes']
+    p = R.profile_params('small', 'iters' => 7, 'storage' => { 'boxes' => 1 },
+                         'wave_s' => 5.0, 'zzz' => 2)
     assert_equal(7, p['iters'], 'iters переопределяется')
-    assert_equal(base, p['api01_loops'], 'служебные ключи не переопределяются')
+    assert_equal(5.0, p['wave_s'], 'wave_s переопределяется')
+    assert_equal(base, p['storage']['boxes'], 'вложенные ключи не переопределяются')
     assert_raises(ArgumentError) { R.profile_params('mega') }
     assert_raises(ArgumentError) { R.profile_params('custom', nil) }
     custom = R.profile_params('custom', R::PROFILES['small'])
     assert_equal('custom', custom['profile'], 'custom принимает полный набор параметров')
+    custom2 = R.profile_params('custom', R::PROFILES['small'].merge('target_mb' => 100))
+    assert_equal(100, custom2['target_mb'], 'custom принимает target_mb')
   end
 
-  test 'профили укладываются в минуту: сетка, api01 и повторы ограничены' do
-    # Решение владельца 2026-10-28: полный прогон любого профиля ≈ ≤1 мин.
+  test 'лимиты безопасности (уроки инцидентов SU2027)' do
     R::PROFILES.each do |name, prof|
-      assert(prof['grid']['n'] <= 150, "#{name}: сетка #{prof['grid']['n']}² слишком велика")
-      assert(prof['api01_loops'] <= 10_000, "#{name}: api01_loops=#{prof['api01_loops']} слишком велик")
+      dv = prof['diverse']
+      inst = dv['grid'] * dv['grid'] * dv['leaves']
+      assert(inst <= 10_000, "#{name}: компонентная сцена #{inst} инстансов > 10 000")
+      assert(prof['poly']['n'] <= 100, "#{name}: полигональная сетка #{prof['poly']['n']}² > 100²")
+      assert(prof['wave']['grid'] <= 80, "#{name}: полотно волны #{prof['wave']['grid']}² > 80²")
+      assert(prof['wave_s'] <= 12.0, "#{name}: волна #{prof['wave']['wave_s'] || prof['wave_s']} с — слишком долго")
+      assert(prof['target_mb'] <= 2_000, "#{name}: цель файла #{prof['target_mb']} МБ слишком велика")
       assert(prof['iters'] <= 3, "#{name}: iters=#{prof['iters']} слишком много")
-      assert(prof['fps_s'] <= 2.0, "#{name}: fps_s=#{prof['fps_s']} слишком долго")
+      assert(prof['fps_s'] <= 3.0, "#{name}: fps_s=#{prof['fps_s']} слишком долго")
     end
   end
 
-  test 'steps: план v3 (ruby, 4 сцены, 5 fps, doc)' do
+  test 'steps: план v4 (5 сцен, 4 fps, волна, storage_open)' do
     steps = R.steps('small')
     kinds = steps.map { |s| s['kind'] }
     assert_equal('begin', kinds.first)
     assert_equal('finish', kinds.last)
-    assert_equal(4, kinds.count('scene'), "ожидали 4 сцены: #{kinds}")
-    assert_equal(5, kinds.count('fps'), '4 режима сетки + текстуры')
-    assert(kinds.include?('ruby'), 'нет RUBY-шага')
-    assert(kinds.include?('doc'), 'нет DOC-шага')
+    assert_equal(5, kinds.count('scene'), "ожидали 5 сцен: #{kinds}")
+    assert_equal(4, kinds.count('fps'), '4 FPS-шага (компоненты ×2 + полигоны ×2)')
+    assert_equal(1, kinds.count('wave'), 'один шаг волны')
+    assert_equal(1, kinds.count('storage_open'), 'один шаг открытия файла')
     scenes = steps.select { |s| s['kind'] == 'scene' }.map { |s| s['scene'] }
-    assert_equal(%w[basics nested grid textured], scenes, 'порядок сцен')
-    refute(scenes.include?('components'), 'сцена components удалена (вешает вьюпорт SU2027)')
+    assert_equal(%w[diverse poly tools wave storage], scenes, 'порядок сцен')
+    refute(kinds.include?('ruby'), 'RUBY-шаг удалён (suite v4)')
+    refute(kinds.include?('doc'), 'DOC-шаг удалён (suite v4)')
     modes = steps.select { |s| s['kind'] == 'fps' }.map { |s| s['mode'] }
-    %w[static orbit pan zoom].each do |m|
-      assert(modes.include?(m), "нет FPS-режима #{m}")
-    end
     refute(modes.include?('pages'), 'page-switch запрещён (инцидент 2026-10-28)')
-    refute(steps.any? { |s| s['id'] == 'fps_components_static' },
-           'fps_components_static удалён (вешает вьюпорт SU2027)')
+  end
+
+  test 'steps: предупреждения профилей упоминают файл' do
+    %w[small medium large].each do |p|
+      assert(R.profile_warning(p).to_s.include?('500'), "#{p}: предупреждение о файле обязательно")
+    end
   end
 
   test 'steps: неизвестный профиль даёт ошибку' do
     assert_raises(ArgumentError) { R.steps('mega') }
   end
 
-  test 'plan_preview: предупреждение для large' do
+  test 'plan_preview: полный план с предупреждением' do
     pp = R.plan_preview('large')
-    assert(pp['warning'].to_s.include?('минут'), 'предупреждение должно оценивать время прогона')
+    assert(pp['warning'].to_s.include?('МБ'), 'предупреждение должно упоминать файл')
     assert_equal(R.steps('large').size, pp['steps'].size, 'в превью все шаги')
-    assert_nil(R.plan_preview('small')['warning'])
+    assert_equal(R.steps('small').size, R.plan_preview('small')['steps'].size)
   end
 
   test 'median: нечётное, чётное, пустое' do
@@ -92,11 +103,11 @@ module Dn1supBenchmark::Test
 
   test 'add_result: контракт записи (схема v1)' do
     R.instance_variable_set(:@state, { 'results' => [] })
-    rec = R.add_result('api', 'API-T', 'Тест', 'ms', [0.010, 0.020, 0.030],
+    rec = R.add_result('tools', 'TOOL-T', 'Тест', 'ms', [0.010, 0.020, 0.030],
                        entities: 5, params: { 'x' => 1 }, ops: 300)
     assert_equal('passed', rec['status'])
     assert_equal('1', rec['test_version'])
-    assert_equal('api', rec['category'])
+    assert_equal('tools', rec['category'])
     assert_equal(3, rec['repeat_count'])
     assert_equal([10.0, 20.0, 30.0], rec['times_ms'])
     assert_equal(20.0, rec['median_ms'])
@@ -113,11 +124,11 @@ module Dn1supBenchmark::Test
 
   test 'add_result: пустые повторы → failed, ошибки валидации видны' do
     R.instance_variable_set(:@state, { 'results' => [] })
-    rec = R.add_result('api', 'API-F', 'Тест', 'ms', [],
+    rec = R.add_result('modeling', 'MODEL-F', 'Тест', 'ms', [],
                        diagnostics: [{ 'class' => 'RuntimeError', 'message' => 'бум', 'backtrace' => [] }])
     assert_equal('failed', rec['status'])
     assert(rec['error'].to_s.include?('RuntimeError'))
-    rec2 = R.add_result('api', 'API-V', 'Тест', 'ms', [0.001],
+    rec2 = R.add_result('modeling', 'MODEL-V', 'Тест', 'ms', [0.001],
                         validation_errors: ['не совпало'])
     assert_equal('passed', rec2['status'])
     refute(rec2['validation']['passed'], 'валидация должна быть не пройдена')
@@ -127,7 +138,7 @@ module Dn1supBenchmark::Test
 
   test 'add_skipped: статус и причина' do
     R.instance_variable_set(:@state, { 'results' => [] })
-    rec = R.add_skipped('documents', 'DOC-X', 'Тест', 'причина пропуска')
+    rec = R.add_skipped('storage', 'STORAGE-X', 'Тест', 'причина пропуска')
     assert_equal('skipped', rec['status'])
     refute(rec['validation']['passed'])
     assert_equal('причина пропуска', rec['error'])
@@ -142,15 +153,17 @@ module Dn1supBenchmark::Test
     refute(R.cancelled?)
   end
 
-  test 'RubyWorkload: детерминизм и заявленный объём' do
-    w = Dn1supBenchmark::RubyWorkload
-    assert_equal(w.run, w.run, 'нагрузка должна быть детерминированной')
-    assert(w::TOTAL_OPS >= 300_000, 'объём операций должен быть заметным')
-    assert_equal(w::TOTAL_OPS, w.spec['total_ops'], 'спецификация согласована')
-  end
-
   test 'perform неизвестного шага не падает' do
     assert(R.perform({ 'kind' => 'zzz' }).is_a?(String))
+  end
+
+  test 'async_step_limit: масштабируется от длительности волны' do
+    R.instance_variable_set(:@state, { 'params' => { 'wave_s' => 10.0 } })
+    assert_equal(30.0, R.async_step_limit, 'минимум 30 с')
+    R.instance_variable_set(:@state, { 'params' => { 'wave_s' => 50.0 } })
+    assert_equal(150.0, R.async_step_limit, '3 × wave_s')
+    R.instance_variable_set(:@state, nil)
+    assert_equal(30.0, R.async_step_limit, 'вне прогона — 30 с')
   end
 
   test 'кусковой движок: порции, фазы, суммы и on_finish' do
@@ -220,6 +233,14 @@ module Dn1supBenchmark::Test
     assert(task['ctx']['done'] && task['ctx']['finished'], 'работа и on_finish выполнены')
   ensure
     R.instance_variable_set(:@run_model, nil)
+  end
+
+  test 'queue_front: работы встают в голову в порядке перечисления' do
+    # Регрессия калибровки storage: проба обязана идти ПОСЛЕ задачи текстур.
+    st = { 'jobs' => %i[tail] }
+    R.queue_front(st, [:task, :t1], [:sync, :s1])
+    assert_equal([[:task, :t1], [:sync, :s1], :tail], st['jobs'],
+                 'задача и следующий за ней sync должны сохранять порядок')
   end
 
   test 'abort_run! сбрасывает состояние прогона' do

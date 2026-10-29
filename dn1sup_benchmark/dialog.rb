@@ -231,10 +231,12 @@ module Dn1supBenchmark
       def load_settings
         raw = Sketchup.read_default('dn1sup_benchmark', SETTINGS_KEY)
         settings = parse_json(raw) || {}
-        defaults = { 'profile' => 'small', 'iters' => nil, 'fps_s' => nil, 'doc_enabled' => true }
+        defaults = { 'profile' => 'small', 'iters' => nil, 'fps_s' => nil,
+                     'wave_s' => nil, 'target_mb' => nil }
         defaults.merge(settings)
       rescue StandardError
-        { 'profile' => 'small', 'iters' => nil, 'fps_s' => nil, 'doc_enabled' => true }
+        { 'profile' => 'small', 'iters' => nil, 'fps_s' => nil,
+          'wave_s' => nil, 'target_mb' => nil }
       end
     end
   end

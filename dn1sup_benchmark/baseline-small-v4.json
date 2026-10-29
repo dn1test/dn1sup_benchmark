@@ -1,0 +1,97 @@
+{
+  "profile": "small",
+  "values": {
+    "model_build": {
+      "value": 14.7,
+      "unit": "ms"
+    },
+    "model_edit_definition": {
+      "value": 0.3,
+      "unit": "ms"
+    },
+    "model_traverse": {
+      "value": 4.2,
+      "unit": "ms"
+    },
+    "model_explode": {
+      "value": 19.1,
+      "unit": "ms"
+    },
+    "fps_components_static": {
+      "value": 59.3,
+      "unit": "fps"
+    },
+    "fps_components_orbit": {
+      "value": 59.5,
+      "unit": "fps"
+    },
+    "fps_poly_static": {
+      "value": 58.8,
+      "unit": "fps"
+    },
+    "fps_poly_orbit": {
+      "value": 58.9,
+      "unit": "fps"
+    },
+    "tool_draw": {
+      "value": 50.9,
+      "unit": "ms"
+    },
+    "tool_pushpull": {
+      "value": 3.4,
+      "unit": "ms"
+    },
+    "tool_move": {
+      "value": 0.2,
+      "unit": "ms"
+    },
+    "tool_rotate": {
+      "value": 0.2,
+      "unit": "ms"
+    },
+    "tool_scale": {
+      "value": 0.2,
+      "unit": "ms"
+    },
+    "tool_followme": {
+      "value": 2.0,
+      "unit": "ms"
+    },
+    "tool_intersect": {
+      "value": 18.5,
+      "unit": "ms"
+    },
+    "tool_paint": {
+      "value": 3.6,
+      "unit": "ms"
+    },
+    "tool_zoom_extents": {
+      "value": 1.6,
+      "unit": "ms"
+    },
+    "fps_wave_orbit": {
+      "value": 59.4,
+      "unit": "fps"
+    },
+    "wave_update_ms": {
+      "value": 2.9,
+      "unit": "ms"
+    },
+    "storage_save": {
+      "value": 533.4,
+      "unit": "ms"
+    },
+    "storage_open": {
+      "value": 600.35,
+      "unit": "ms"
+    }
+  },
+  "missing": [],
+  "reference": {
+    "source_run": "bench-SU27__small__20261028-203045",
+    "sketchup": "27.0.264",
+    "ruby": "3.4.9",
+    "frozen_at": "2026-10-28",
+    "suite": "4"
+  }
+}

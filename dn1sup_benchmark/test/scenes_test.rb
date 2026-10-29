@@ -5,6 +5,8 @@
 require_relative 'test_helper'
 
 module Dn1supBenchmark::Test
+  SC = Dn1supBenchmark::Scenes
+
   def self.smoke_scene(name)
     skip('вне SketchUp: нет активной модели') unless defined?(Sketchup) && Sketchup.active_model
     model = Sketchup.active_model
@@ -22,39 +24,45 @@ module Dn1supBenchmark::Test
     end
   end
 
-  test 'nested: цепочка вложенных групп' do
-    info = self.smoke_scene('nested') do |model|
-      Dn1supBenchmark::Scenes.build_nested(model, 4, 2)
+  test 'diverse: уникальные компоненты, сборки, сетка' do
+    smoke_scene('diverse') do |model|
+      info = SC.build_diverse(model, { 'grid' => 4, 'leaves' => 2, 'leaf_defs' => 5, 'asm_defs' => 3 })
+      # Проверки — ДО отката операции: после abort определения удаляются.
+      assert_equal(4 * 4 * 2, info['entities'], '4² сборок × 2 листа = 32 инстанса')
+      assert_equal(5, info['leaf_defs'].size, 'уникальных листовых определений')
+      names = info['leaf_defs'].map(&:name)
+      assert_equal(names.uniq.size, names.size, 'определения должны быть разными')
+      info
     end
-    assert_equal(4, info['path'].size, 'глубина цепочки')
   end
 
-  test 'grid: сетка смежных граней' do
-    info = self.smoke_scene('grid') do |model|
-      Dn1supBenchmark::Scenes.build_grid(model, 6)
+  test 'poly: сетка цилиндров' do
+    info = smoke_scene('poly') do |model|
+      SC.build_poly(model, 5, 24)
     end
-    assert_equal(36, info['faces'], '6×6 = 36 граней')
+    assert_equal(25, info['entities'], '5×5 = 25 инстансов')
+    assert_equal(25 * (2 * 24 + 2), info['triangles'], 'оценка треугольников')
   end
 
-  test 'textured: боксы под раскраску' do
-    info = self.smoke_scene('textured') do |model|
-      Dn1supBenchmark::Scenes.build_textured(model, 5)
+  test 'wave: полотно кубов 100×100×100 мм' do
+    info = smoke_scene('wave') do |model|
+      SC.build_wave(model, 4)
     end
-    assert_equal(5, info['boxes'], '5 боксов')
-    assert_equal(30, info['entities'], '5 боксов × 6 граней')
+    assert_equal(16, info['entities'], '4×4 = 16 кубов')
+    assert_equal(16, info['instances'].size)
+    assert_equal(16, info['positions'].size)
+    # Центрирование: сумма координат по каждой оси = 0.
+    sx = info['positions'].sum { |x, _y| x }
+    assert_equal(0.0, sx, 'полотно центрировано по X')
   end
 
-  test 'grid_row: одна строка даёт n граней' do
-    skip('вне SketchUp: нет активной модели') unless defined?(Sketchup) && Sketchup.active_model
-    model = Sketchup.active_model
-    model.start_operation('dn1sup_benchmark test: grid_row', true)
-    begin
-      before = model.entities.grep(Sketchup::Face).size
-      Dn1supBenchmark::Scenes.grid_row(model, 5, 2)
-      assert_equal(5, model.entities.grep(Sketchup::Face).size - before, '5 граней в строке')
-    ensure
-      model.abort_operation
+  test 'storage_box: уникальные тела в определении' do
+    info = smoke_scene('storage') do |model|
+      defn = model.definitions.add('dn1_test_storage')
+      SC.build_storage(defn, 3)
     end
+    assert_equal(3, info['boxes'])
+    assert(info['entities'] >= 18, '3 бокса ≥ 18 граней')
   end
 
   test 'сцены детерминированы: два построения дают одно число сущностей' do
@@ -63,7 +71,7 @@ module Dn1supBenchmark::Test
     counts = 2.times.map do
       model.start_operation('dn1sup_benchmark test: determinism', true)
       begin
-        Dn1supBenchmark::Scenes.build_grid(model, 5)['faces']
+        SC.build_poly(model, 5)['entities']
       ensure
         model.abort_operation
       end

@@ -1,30 +1,47 @@
 # frozen_string_literal: true
 # =============================================================================
-# dn1sup_benchmark/runner.rb — методика и выполнение бенчмарка (набор v2).
+# dn1sup_benchmark/runner.rb — методика и выполнение бенчмарка (набор v4).
 #
-# Прогон = последовательность ШАГОВ (Runner.steps): begin → RUBY-01 → сцены
-# (в каждой — синхронные тесты) → FPS-шаги → DOC-шаг → finish. Один и тот же
-# план исполняется двумя способами:
+# Прогон = последовательность ШАГОВ (Runner.steps), ровно пять категорий ТЗ:
+#   1. modeling  — эмуляция моделирования: сложная модель из уникальных
+#                  компонентов и вложенных сборок + правка определения,
+#                  обход дерева, расформирование;
+#   2. tools     — скорость встроенных инструментов через их API-эквиваленты
+#                  (черчение, Push/Pull, Move, Rotate, Scale, Follow Me,
+#                  Intersect, Paint Bucket, Zoom Extents; Offset и Solid
+#                  Tools Ruby-API не имеют — помечено в отчёте);
+#   3. viewport  — FPS вьюпорта на тяжёлой модели (компоненты + полигоны),
+#                  режимы static/orbit;
+#   4. animation — волна из кубиков 100×100×100 мм: бегущая диагональная
+#                  волна пакетами Entities#transform_entities + полный
+#                  оборот камеры (WaveTool);
+#   5. storage   — файл ~500 МБ: кусковая сборка (уникальная геометрия +
+#                  шумовые PNG-текстуры), калибровка размера, сохранение ×2
+#                  и открытие с МБ/с.
+#
+# Один и тот же план исполняется двумя способами:
 #   • из меню/диалога — секвенсор на UI.start_timer (sequencer.rb): UI не
 #     блокируется, FPS-метр получает честные кадры;
-#   • через мост — пошагово отдельными eval (command.rb), между :fps и сбором
-#     результата клиент выдерживает паузу сам.
+#   • через мост — пошагово отдельными eval (command.rb), между :fps/:wave
+#     и сбором результата клиент выдерживает паузу сам.
 #
 # Сцена живёт внутри одной undo-операции: start_operation → build → тесты →
 # clear! + abort_operation (проверенный паттерн). Модель пользователя после
 # прогона возвращается к исходному состоянию, undo-стек не засоряется.
-# API-06 намеренно выполняет вложенные операции УРОВНЯ 1 внутри операции
-# сцены — методика зафиксирована в параметрах теста (nested_in_scene_op).
+# Тест файла открывает собранный .skp в отдельной вкладке и закрывает его
+# (паттерн DOC-тестов 0.2–0.3: смена модели только вне открытой операции).
 #
 # Замеры: только Process.clock_gettime(CLOCK_MONOTONIC); повтор count раз;
 # статистика median/min/max + p95 (n>=10); GC.start между тестами. Каждый
-# результат несёт контракт теста (см. schemas/result-schema-v1.json): id,
+# результат несёт контракт теста (schemas/result-schema-v1.json): id,
 # test_version, категория, статус passed/failed/cancelled/skipped, параметры,
 # валидация и диагностика. Ошибка теста не роняет прогон.
 #
-# Отмена: Runner.cancel! поднимает флаг; между повторами и между шагами
+# Отмена: Runner.cancel! поднимает флаг; между повторами, порциями и шагами
 # выполняющий код бросает Cancelled — результат получает статус cancelled,
-# отчёт всё равно сохраняется.
+# отчёт всё равно сохраняется. Сохранение/открытие файла ~500 МБ —
+# атомарные вызовы ядра, на их время UI кратко блокируется (отмечено
+# в параметрах теста и предупреждении профиля).
 # =============================================================================
 
 require 'json'
@@ -33,28 +50,22 @@ module Dn1supBenchmark
   module Runner
     # Версия НАБОРА тестов: меняется при изменении состава/методики
     # (сравнение прогонов с разными suite-версиями помечается несовместимым).
-    # 3 — удалены сцена components (вместе с API-04 и легаси-дублями) и
-    #     fps_components_static: на SU2027 вьюпорт зависает (100% CPU) на
-    #     простое после сцены ~80 000 вложенных инстансов компонентов
-    #     (large: 10 000 сборок × 8 листьев), что блокировало и FPS-замер,
-    #     и все последующие шаги; профили medium/large перекалиброваны под
-    #     полный прогон ~1 минута (см. CHANGELOG 0.4.0).
-    SUITE_VERSION = '3'
+    # 4 — полная смена набора под ТЗ от 2026-10-28: удалены RUBY/API-xx/
+    #     сцены nested/grid/textured/DOC (малый файл)/fps_grid_*; новые
+    #     категории modeling/tools/viewport/animation/storage (волна,
+    #     файл ~500 МБ). Лимит компонентных сцен ≤10 тыс. инстансов —
+    #     урок зависания SU2027 на 80 тыс. (suite v3).
+    SUITE_VERSION = '4'
     # Версия конкретного теста: менять при изменении его измеряемой операции.
     TEST_VERSION = '1'
 
     # Категории таксономии ТЗ; group в результате = категория.
     GROUP_TITLES = {
-      'ruby' => 'Чистый Ruby',
-      'api' => 'SketchUp API',
-      'documents' => 'Файлы (документы)',
-      'graphics' => 'Графика (вьюпорт)',
-      # легаси-имена групп из отчётов 0.1.0 — только для отображения старых HTML
-      'scene_gen' => 'Построение сцен (ядро геометрии)',
-      'viewport' => 'Вьюпорт (FPS рендера)',
-      'hierarchy' => 'Навигация по иерархии',
-      'editing' => 'Редактирование',
-      'textures' => 'Материалы и текстуры'
+      'modeling' => '1. Моделирование: сложная модель (эмуляция пользователя)',
+      'tools' => '2. Инструменты SketchUp (API-эквиваленты)',
+      'viewport' => '3. Вьюпорт: FPS на тяжёлой модели',
+      'animation' => '4. Анимация: волна из кубиков 100×100 мм',
+      'storage' => '5. Файл ~500 МБ: сохранение и загрузка'
     }.freeze
 
     class Cancelled < StandardError
@@ -71,65 +82,63 @@ module Dn1supBenchmark
       end
     end
 
-    # Профили: три ступени нагрузки; КАЖДЫЙ полный прогон укладывается
-    # примерно в минуту (решение владельца 2026-10-28 после того, как
-    # large по целям ТЗ — 500 тыс. рёбер — стал бенчмарком на десятки минут:
-    # SU2027 деградирует на вставке в большие модели). Параметры сцен
-    # записываются в отчёт (meta.params + параметры каждого теста).
-    #   grid n      → n² граней, ≈2·n·(n+1) рёбер (смежная сетка);
-    #   api03       → instances инстансов компонентов;
-    #   api01_loops → loops контуров × 4 ребра + loops граней.
+    # Профили: три ступени нагрузки для категорий 1–4; тест файла во всех
+    # профилях с целью 500 МБ (настраивается). Параметры сцен записываются
+    # в отчёт (meta.params + параметры каждого теста).
+    #   diverse: grid² сборок × leaves листьев = всего инстансов
+    #            (лимит ≤10 000 — зависание SU2027 на 80 000);
+    #   poly:    n² цилиндров по segments сегментов ≈ n²×(2s+2) треугольников;
+    #   wave:    grid² кубов 100×100×100 мм, волна wave_s секунд;
+    #   tools:   масштабы фикстур тестов инструментов;
+    #   storage: уникальных тел + шумовые текстуры 4096² до цели target_mb.
     PROFILES = {
       'small' => {
-        'targets' => { 'edges' => 10_000, 'instances' => 100 },
-        'grid' => { 'n' => 70 },
-        'nested' => { 'depth' => 6, 'items' => 4 },
-        'textured' => { 'boxes' => 24 },
-        'api01_loops' => 2_500,
-        'api02_groups' => 100,
-        'api03_defs' => 10, 'api03_instances' => 100,
-        'api05_objects' => 100,
-        'api06_faces' => 100,
-        'fps_s' => 1.5, 'iters' => 3,
-        'pushpull' => 8, 'move' => 10, 'add_faces' => 8, 'tex_apply' => 60,
-        'doc_enabled' => true
+        'targets' => { 'instances' => 1_024, 'triangles' => 173_000, 'file_mb' => 500 },
+        'diverse' => { 'grid' => 16, 'leaves' => 4, 'leaf_defs' => 24, 'asm_defs' => 6 },
+        'poly' => { 'n' => 40, 'segments' => 36 },
+        'wave' => { 'grid' => 36 },
+        'tools' => { 'draw' => 240, 'pushpull' => 24, 'inst' => 240,
+                     'followme' => 8, 'intersect' => 16, 'paint' => 240 },
+        'storage' => { 'boxes' => 1_200, 'tex_size' => 4_096, 'max_tex' => 24 },
+        'target_mb' => 500,
+        'fps_s' => 2.0, 'iters' => 3, 'wave_s' => 8.0
       },
       'medium' => {
-        'targets' => { 'edges' => 16_000, 'instances' => 300 },
-        'grid' => { 'n' => 90 },
-        'nested' => { 'depth' => 6, 'items' => 8 },
-        'textured' => { 'boxes' => 48 },
-        'api01_loops' => 4_000,
-        'api02_groups' => 300,
-        'api03_defs' => 16, 'api03_instances' => 300,
-        'api05_objects' => 200,
-        'api06_faces' => 120,
-        'fps_s' => 2.0, 'iters' => 2,
-        'pushpull' => 16, 'move' => 16, 'add_faces' => 12, 'tex_apply' => 150,
-        'doc_enabled' => true
+        'targets' => { 'instances' => 2_304, 'triangles' => 389_000, 'file_mb' => 500 },
+        'diverse' => { 'grid' => 24, 'leaves' => 4, 'leaf_defs' => 32, 'asm_defs' => 8 },
+        'poly' => { 'n' => 60, 'segments' => 36 },
+        'wave' => { 'grid' => 48 },
+        'tools' => { 'draw' => 480, 'pushpull' => 48, 'inst' => 480,
+                     'followme' => 12, 'intersect' => 24, 'paint' => 480 },
+        'storage' => { 'boxes' => 2_000, 'tex_size' => 4_096, 'max_tex' => 24 },
+        'target_mb' => 500,
+        'fps_s' => 2.0, 'iters' => 2, 'wave_s' => 9.0
       },
       'large' => {
-        'targets' => { 'edges' => 29_000, 'instances' => 600 },
-        'grid' => { 'n' => 120 },
-        'nested' => { 'depth' => 6, 'items' => 12 },
-        'textured' => { 'boxes' => 72 },
-        'api01_loops' => 6_000,
-        'api02_groups' => 500,
-        'api03_defs' => 24, 'api03_instances' => 600,
-        'api05_objects' => 300,
-        'api06_faces' => 200,
-        'fps_s' => 1.5, 'iters' => 2,
-        'pushpull' => 20, 'move' => 20, 'add_faces' => 16, 'tex_apply' => 200,
-        'doc_enabled' => true
+        'targets' => { 'instances' => 8_192, 'triangles' => 691_000, 'file_mb' => 500 },
+        'diverse' => { 'grid' => 32, 'leaves' => 8, 'leaf_defs' => 48, 'asm_defs' => 10 },
+        'poly' => { 'n' => 80, 'segments' => 36 },
+        'wave' => { 'grid' => 64 },
+        'tools' => { 'draw' => 800, 'pushpull' => 80, 'inst' => 800,
+                     'followme' => 16, 'intersect' => 32, 'paint' => 800 },
+        'storage' => { 'boxes' => 3_000, 'tex_size' => 4_096, 'max_tex' => 24 },
+        'target_mb' => 500,
+        'fps_s' => 2.0, 'iters' => 2, 'wave_s' => 10.0
       }
     }.freeze
 
     # Ключи, которые пользователь может переопределить (Настройки диалога).
-    OVERRIDABLE = %w[iters fps_s doc_enabled].freeze
+    OVERRIDABLE = %w[iters fps_s wave_s target_mb].freeze
+
+    STORAGE_NOTE = 'тест файла ~500 МБ: сборка и сохранение занимают несколько ' \
+                   'минут, нужно ~1,5 ГБ свободного места и заметная память; ' \
+                   'во время сохранения/открытия UI кратко блокируется'.freeze
 
     PROFILE_WARNINGS = {
-      'large' => 'Самый тяжёлый профиль (сетка 120×120, 600 инстансов, ' \
-                 '2 повтора): полный прогон занимает около минуты.',
+      'small' => "Полный прогон включает #{STORAGE_NOTE}.",
+      'medium' => "Нагрузка выше small; #{STORAGE_NOTE}.",
+      'large' => "Самый тяжёлый профиль (~8 тыс. инстансов, ~690 тыс. треугольников, " \
+                 "волна 64×64); #{STORAGE_NOTE}.",
       'custom' => 'Пользовательский профиль: нагрузка определяется вашими параметрами.'
     }.freeze
 
@@ -179,34 +188,31 @@ module Dn1supBenchmark
         profile_params(profile, overrides) # валидация профиля до старта
         [
           { 'kind' => 'begin', 'profile' => profile, 'overrides' => overrides, 'label' => 'Инициализация' },
-          { 'kind' => 'ruby', 'category' => 'ruby', 'label' => 'RUBY-01: чистый Ruby' },
-          { 'kind' => 'scene', 'scene' => 'basics', 'category' => 'api',
-            'label' => 'API-01…03, 05: рёбра/грани, группы, компоненты, атрибуты' },
-          { 'kind' => 'scene', 'scene' => 'nested', 'category' => 'api',
-            'label' => 'Сцена: вложенные группы (иерархия)' },
-          # Сцена components и fps_components_static УДАЛЕНЫ (suite v3): на
-          # SU2027 вьюпорт зависает на простое после сцены ~80 000 вложенных
-          # инстансов (large), что блокировало FPS-замер и все последующие
-          # шаги. Детали — в CHANGELOG 0.4.0.
-          { 'kind' => 'scene', 'scene' => 'grid', 'category' => 'api',
-            'label' => 'Сцена: плотная сетка (API-06, pushpull, zoom, страницы)' },
-          { 'kind' => 'fps', 'id' => 'fps_grid_static', 'mode' => 'static', 'category' => 'graphics',
-            'name' => 'FPS: сетка, статичный вид' },
-          { 'kind' => 'fps', 'id' => 'fps_grid_orbit', 'mode' => 'orbit', 'category' => 'graphics',
-            'name' => 'FPS: сетка, орбита' },
-          { 'kind' => 'fps', 'id' => 'fps_grid_pan', 'mode' => 'pan', 'category' => 'graphics',
-            'name' => 'FPS: сетка, панорамирование' },
-          { 'kind' => 'fps', 'id' => 'fps_grid_zoom', 'mode' => 'zoom', 'category' => 'graphics',
-            'name' => 'FPS: сетка, зум' },
-          # Переключение сцен (Pages#selected_page=) автоматизировано НЕ будет:
+          { 'kind' => 'scene', 'scene' => 'diverse', 'category' => 'modeling',
+            'label' => 'Моделирование: сборка сложной модели + правка/обход/расформирование' },
+          { 'kind' => 'fps', 'id' => 'fps_components_static', 'mode' => 'static', 'category' => 'viewport',
+            'name' => 'FPS: компоненты — статичный вид' },
+          { 'kind' => 'fps', 'id' => 'fps_components_orbit', 'mode' => 'orbit', 'category' => 'viewport',
+            'name' => 'FPS: компоненты — орбита' },
+          { 'kind' => 'scene', 'scene' => 'poly', 'category' => 'viewport',
+            'label' => 'Сцена полигональной нагрузки (сетка цилиндров)' },
+          { 'kind' => 'fps', 'id' => 'fps_poly_static', 'mode' => 'static', 'category' => 'viewport',
+            'name' => 'FPS: полигоны — статичный вид' },
+          { 'kind' => 'fps', 'id' => 'fps_poly_orbit', 'mode' => 'orbit', 'category' => 'viewport',
+            'name' => 'FPS: полигоны — орбита' },
+          { 'kind' => 'scene', 'scene' => 'tools', 'category' => 'tools',
+            'label' => 'Инструменты: черчение, push/pull, перемещение, поворот, масштаб, follow me, пересечение, окраска, zoom' },
+          { 'kind' => 'scene', 'scene' => 'wave', 'category' => 'animation',
+            'label' => 'Волна: построение полотна кубов 100×100 мм' },
+          # Переключение страниц (Pages#selected_page=) автоматизировано НЕ будет:
           # применение страницы внутри открытой undo-операции фиксирует
           # транзакцию ядра, и последующий abort уже не откатывает контент
-          # (инцидент 2026-10-28, SU2027 — см. README). Ручной сценарий.
-          { 'kind' => 'scene', 'scene' => 'textured', 'category' => 'api',
-            'label' => 'Сцена: текстуры (назначение, перекраска)' },
-          { 'kind' => 'fps', 'id' => 'fps_textured_static', 'mode' => 'static', 'category' => 'graphics',
-            'name' => 'FPS: текстуры, статичный вид' },
-          { 'kind' => 'doc', 'category' => 'documents', 'label' => 'DOC-01/02: сохранение и открытие контрольной модели' },
+          # (инцидент 2026-10-28, SU2027). Ручной сценарий.
+          { 'kind' => 'wave', 'id' => 'wave_animation', 'category' => 'animation',
+            'name' => 'Волна: анимация + полный оборот камеры (FPS)' },
+          { 'kind' => 'scene', 'scene' => 'storage', 'category' => 'storage',
+            'label' => 'Файл: сборка модели ~500 МБ (геометрия + текстуры), сохранение ×2' },
+          { 'kind' => 'storage_open', 'category' => 'storage', 'label' => 'Файл: открытие ~500 МБ' },
           { 'kind' => 'finish', 'label' => 'Отчёт' }
         ]
       end
@@ -228,17 +234,17 @@ module Dn1supBenchmark
 
       def perform(step)
         case step['kind']
-        when 'begin'  then begin_run(step['profile'], step['overrides'])
-        when 'ruby'   then run_ruby_test
-        when 'scene'  then open_scene(step['scene'])
-        when 'fps'    then fps_start(step)
-        when 'doc'    then run_doc_tests
-        when 'finish' then finish_run
+        when 'begin'        then begin_run(step['profile'], step['overrides'])
+        when 'scene'        then open_scene(step['scene'])
+        when 'fps'          then fps_start(step)
+        when 'wave'         then wave_start(step)
+        when 'storage_open' then storage_open_tests
+        when 'finish'       then finish_run
         else "неизвестный шаг: #{step['kind']}"
         end
       ensure
         # Шаги, трогающие модель, обязаны остаться на модели прогона.
-        guard_model! if %w[scene fps doc].include?(step['kind'])
+        guard_model! if %w[scene fps wave storage_open].include?(step['kind'])
       end
 
       def begin_run(profile, overrides = nil)
@@ -259,8 +265,12 @@ module Dn1supBenchmark
           'scene_info' => nil,
           'log' => []
         }
-        PngGen.cached_textures([256, 1024, 2048]) # генерация вне замеров
         log_line("прогон начат (#{profile})")
+        begin
+          File.delete(File.join(PngGen.temp_root, 'run_heartbeat.log'))
+        rescue StandardError
+          nil
+        end
         'ok'
       end
 
@@ -356,6 +366,13 @@ module Dn1supBenchmark
           'ctx' => {}, 'times' => [], 'on_finish' => on_finish }
       end
 
+      # Вставить работы в ГОЛОВУ очереди сцены (в порядке перечисления) —
+      # для калибровочных цепочек storage, порождающих работы по ходу.
+      # unshift(*jobs) сам ставит их в начало в естественном порядке.
+      def queue_front(st, *jobs)
+        st['jobs'].unshift(*jobs)
+      end
+
       def open_scene(name)
         guard_model!
         st = @scene_state
@@ -400,67 +417,17 @@ module Dn1supBenchmark
         end
       end
 
-      def record_scene_gen(name, dt, info)
-        @state['scene_info'] = info
-        GC.start
-        if info['entities'].to_i.positive?
-          add_result('api', "scene_gen_#{name}", "Построение: #{scene_title(name)}",
-                     'ms', [dt], entities: info['entities'],
-                     params: scene_params(name))
-        end
-        log_line("сцена #{name}: #{(dt * 1000).round} мс, entities=#{info['entities']}")
-      end
-
       # План работ сцены: построение (кусками для тяжёлых сцен) + тесты.
       def scene_plan(name, model)
         st = @scene_state
         p = @state['params']
         case name
-        when 'basics'
-          plan_basics(st, model, p)
-        when 'nested'
-          st['jobs'] << [:sync, -> {
-            t0 = Dn1supBenchmark.monotonic
-            info = Scenes.build_nested(model, p['nested']['depth'], p['nested']['items'])
-            record_scene_gen('nested', Dn1supBenchmark.monotonic - t0, info)
-            tests_nested(model, p)
-            st['result'] = "ok: nested (entities=#{info['entities']})"
-          }]
-        when 'grid'
-          n = p['grid']['n']
-          build = make_task(
-            [{ 'timed' => true, 'total' => n, 'batch' => [n, 8].min,
-               'work' => ->(from, to, _ctx) {
-                 from.upto(to - 1) { |i| Scenes.grid_row(model, n, i) }
-               } }],
-            ->(_times, _ph, _ctx) {
-              record_scene_gen('grid', build['phases'][0]['sums'].to_f,
-                               { 'entities' => n * n, 'n' => n, 'faces' => n * n })
-            }
-          )
-          st['jobs'] << [:task, build]
-          st['jobs'] << [:sync, -> { tests_grid(model, p) }]
-          st['jobs'] << [:task, api06_task(model, p)]
-          st['jobs'] << [:sync, -> { st['result'] = "ok: grid (#{n * n} граней)" }]
-        when 'textured'
-          boxes = p['textured']['boxes']
-          build = make_task(
-            [{ 'timed' => true, 'total' => boxes, 'batch' => [boxes, 64].min,
-               'work' => ->(from, to, _ctx) {
-                 from.upto(to - 1) { |i| Scenes.textured_box(model, boxes, i) }
-               } }],
-            ->(_times, _ph, _ctx) {
-              record_scene_gen('textured', build['phases'][0]['sums'].to_f,
-                               { 'entities' => boxes * 6, 'boxes' => boxes })
-            }
-          )
-          st['jobs'] << [:task, build]
-          st['jobs'] << [:sync, -> {
-            tests_textured(model, p)
-            st['result'] = "ok: textured (#{boxes} боксов)"
-          }]
-        else
-          raise ArgumentError, "неизвестная сцена: #{name}"
+        when 'diverse' then plan_diverse(st, model, p)
+        when 'poly'    then plan_poly(st, model, p)
+        when 'tools'   then plan_tools(st, model, p)
+        when 'wave'    then plan_wave(st, model, p)
+        when 'storage' then plan_storage(st, model, p)
+        else raise ArgumentError, "неизвестная сцена: #{name}"
         end
       end
 
@@ -499,24 +466,365 @@ module Dn1supBenchmark
         nil
       end
 
-      # -- RUBY-01 ---------------------------------------------------------------------
+      # ==========================================================================
+      # 1. MODELING — эмуляция моделирования пользователя
+      # ==========================================================================
 
-      def run_ruby_test
-        return 'нет активного прогона' if @state.nil?
+      def plan_diverse(st, model, p)
+        dp = p['diverse']
+        grid = dp['grid']
+        leaves = dp['leaves']
+        leaf_defs_n = dp['leaf_defs']
+        asm_defs_n = dp['asm_defs']
+        total_instances = grid * grid * leaves
 
-        params = @state['params']
-        guard_model!
-        spec = RubyWorkload.spec
-        measure('ruby', 'RUBY-01', 'Чистый Ruby: массивы, хеши, арифметика',
-                'ms', params['iters'],
-                params: spec.merge('profile_note' => 'фиксированная нагрузка без обращения к SketchUp API'),
-                ops: RubyWorkload::TOTAL_OPS) do |_i|
-          RubyWorkload.run
-        end
-        'ok: RUBY-01'
+        build = make_task(
+          [
+            { 'timed' => true, 'total' => leaf_defs_n, 'batch' => 8,
+              'work' => lambda { |from, to, ctx|
+                (ctx['leaf_defs'] ||= []).concat(
+                  from.upto(to - 1).map { |i| Scenes.diverse_leaf_def(model, i) }
+                )
+              } },
+            { 'timed' => true, 'total' => asm_defs_n, 'batch' => 4,
+              'work' => lambda { |from, to, ctx|
+                (ctx['asm_defs'] ||= []).concat(
+                  from.upto(to - 1).map { |j| Scenes.diverse_asm_def(model, ctx['leaf_defs'], j, leaves) }
+                )
+              } },
+            { 'timed' => true, 'total' => grid * grid, 'batch' => 128,
+              'work' => lambda { |from, to, ctx|
+                (ctx['instances'] ||= []).concat(
+                  from.upto(to - 1).map { |i| Scenes.diverse_top_instance(model, ctx['asm_defs'], grid, i) }
+                )
+              } }
+          ],
+          lambda { |_times, phs, ctx|
+            total = phs.select { |ph| ph['timed'] }.sum { |ph| ph['sums'].to_f }
+            @state['scene_info'] = {
+              'instances' => ctx['instances'], 'leaf_defs' => ctx['leaf_defs'],
+              'grid' => grid, 'leaves' => leaves, 'entities' => total_instances
+            }
+            GC.start
+            add_result('modeling', 'model_build',
+                       "Сборка сложной модели: #{leaf_defs_n} уникальных компонентов, " \
+                       "#{asm_defs_n} сборок, сетка #{grid}×#{grid} (#{total_instances} инстансов)",
+                       'ms', [total],
+                       entities: total_instances, entities_created: total_instances,
+                       ops: total_instances,
+                       params: { 'leaf_definitions' => leaf_defs_n,
+                                 'assembly_definitions' => asm_defs_n,
+                                 'leaves_per_assembly' => leaves, 'grid' => grid,
+                                 'instances_total' => total_instances,
+                                 'content' => 'все листовые компоненты разные; сборки из разных наборов' },
+                       status: 'passed')
+            log_line("diverse: #{(total * 1000).round} мс, инстансов #{total_instances}")
+          }
+        )
+        st['jobs'] << [:task, build]
+        st['jobs'] << [:sync, -> {
+          tests_modeling(model, p)
+          st['result'] = "ok: diverse (#{total_instances} инстансов)"
+        }]
       end
 
-      # -- FPS (асинхронно: start → кадры идут в UI-потоке → collect) -------------------
+      def tests_modeling(model, p)
+        info = @state['scene_info'] || {}
+        iters = p['iters']
+        leaf_defs = info['leaf_defs'] || []
+        instances = (info['instances'] || []).select { |i| i.respond_to?(:valid?) && i.valid? }
+
+        # Правка листового определения: добавить грань → вытянуть → стереть.
+        # Все инстансы определения пересчитываются ядром.
+        unless leaf_defs.empty?
+          leaf = leaf_defs.first
+          before = leaf.entities.size
+          measure('modeling', 'model_edit_definition',
+                  "Правка определения компонента (пересчёт всех инстансов)",
+                  'ms', iters,
+                  entities: instances.size, ops: 1,
+                  params: { 'definition' => leaf.name,
+                            'op' => 'add_face + pushpull ±30 мм + erase (цикл)',
+                            'instances_sharing' => 'определение используется сборками по всей сетке' },
+                  validate: proc { |sz| sz == before ? [] : ["сущностей определения #{sz} вместо #{before}"] }) do |i|
+            face = leaf.entities.add_face([10.mm, 10.mm, 0], [50.mm, 10.mm, 0],
+                                          [50.mm, 50.mm, 0], [10.mm, 50.mm, 0])
+            # pushpull в минус схлопывает бокс и удаляет грань — проверяем.
+            face.pushpull(i.even? ? 30.mm : -30.mm)
+            leaf.entities.erase_entities([face]) if face.valid?
+            leaf.entities.size
+          end
+        end
+
+        # Обход дерева модели: рекурсивно, включая определения инстансов.
+        measure('modeling', 'model_traverse', 'Обход дерева модели (группы + компоненты)',
+                'ms', iters,
+                entities: info['entities'], ops: info['entities'],
+                params: { 'op' => 'рекурсивный обход entities; у инстансов — определения' },
+                validate: proc { |c| c.to_i.positive? ? [] : ['обход вернул 0'] }) do |_i|
+          traverse_count(model)
+        end
+
+        # Расформирование половины сборок верхнего уровня (один проход).
+        k = instances.size / 2
+        if k.positive?
+          t0 = Dn1supBenchmark.monotonic
+          instances.first(k).each(&:explode)
+          dt = Dn1supBenchmark.monotonic - t0
+          add_result('modeling', 'model_explode', "Расформирование сборок (#{k} шт. → группы)",
+                     'ms', [dt], entities: k, ops: k,
+                     params: { 'exploded' => k, 'op' => 'ComponentInstance#explode' },
+                     status: 'passed')
+          log_line("model_explode: #{(dt * 1000).round} мс")
+        end
+      end
+
+      def traverse_count(model)
+        total = 0
+        stack = model.entities.to_a
+        until stack.empty?
+          e = stack.pop
+          total += 1
+          if e.is_a?(Sketchup::Group)
+            stack.concat(e.entities.to_a)
+          elsif e.is_a?(Sketchup::ComponentInstance)
+            stack.concat(e.definition.entities.to_a)
+          end
+        end
+        total
+      end
+
+      # ==========================================================================
+      # 2. TOOLS — скорость встроенных инструментов (API-эквиваленты)
+      # ==========================================================================
+      # Нативные инструменты не имеют мышиного драйвера: тестируются API под
+      # ними. Offset и Solid Tools Ruby-API не предоставляют — фиксируется в
+      # отчёте (дисклеймер группы). Фикстуры строятся в своих группах, чтобы
+      # не задевать содержимое модели пользователя.
+
+      def plan_tools(st, model, p)
+        st['jobs'] << [:sync, -> { test_tool_draw(model, p) }]
+        st['jobs'] << [:sync, -> { test_tool_pushpull(model, p) }]
+        st['jobs'] << [:sync, -> { test_tool_transforms(model, p) }]
+        st['jobs'] << [:sync, -> { test_tool_followme(model, p) }]
+        st['jobs'] << [:sync, -> { test_tool_intersect(model, p) }]
+        st['jobs'] << [:sync, -> { test_tool_paint(model, p) }]
+        st['jobs'] << [:sync, -> { test_tool_zoom_extents(model, p) }]
+        st['jobs'] << [:sync, -> { st['result'] = 'ok: tools (9 тестов)' }]
+      end
+
+      # Черчение: линии, прямоугольники, окружности, дуги — по per штук каждого.
+      def test_tool_draw(model, p)
+        per = (p['tools']['draw'] / 4.0).ceil
+        measure_op('tools', 'tool_draw',
+                   "Черчение: линии, прямоугольники, окружности, дуги (по #{per})",
+                   'ms', p['iters'],
+                   entities: per * 4, ops: per * 4,
+                   params: { 'each_kind' => per, 'kinds' => 'add_line, add_face, add_circle(24), add_arc(12)',
+                             'native_tools' => 'Line / Rectangle / Circle / Arc' },
+                   setup: ->(_i) { [] },
+                   check: proc { |created, _ctx|
+                     created.count { |e| e.respond_to?(:valid?) && e.valid? } == created.size ? [] : ['часть сущностей невалидна']
+                   },
+                   cleanup: proc { |created, _ctx|
+                     model.entities.erase_entities(created.select { |e| e.respond_to?(:valid?) && e.valid? })
+                   }) do |created, _i|
+          ents = model.entities
+          per.times do |k|
+            x = (k % 50) * 300.mm
+            y = ((k / 50) % 50) * 300.mm
+            created << ents.add_line([x, y, 0], [x + 200.mm, y, 0])
+            face = ents.add_face([x, y + 300.mm, 0], [x + 200.mm, y + 300.mm, 0],
+                                 [x + 200.mm, y + 500.mm, 0], [x, y + 500.mm, 0])
+            created << face
+            created.concat(face.edges)
+            circle = ents.add_circle([x + 100.mm, y + 700.mm, 0], [0, 0, 1], 80.mm, 24)
+            created.concat(Scenes.curve_edges(circle))
+            arc = ents.add_arc([x + 300.mm, y + 700.mm, 0], [1, 0, 0], [0, 0, 1], 80.mm, 0, Math::PI, 12)
+            created.concat(Scenes.curve_edges(arc))
+          end
+          created
+        end
+      end
+
+      # Push/Pull: батч граней +40/−40 мм (ссылки на грани переживают вытягивание
+      # внутри группы, поэтому батч собирается заново на каждой итерации).
+      def test_tool_pushpull(model, p)
+        n = p['tools']['pushpull']
+        g = model.entities.add_group
+        n.times do |k|
+          x = (k % 20) * 300.mm
+          y = ((k / 20) % 20) * 300.mm
+          g.entities.add_face([x, y, 0], [x + 200.mm, y, 0], [x + 200.mm, y + 200.mm, 0], [x, y + 200.mm, 0])
+        end
+        measure('tools', 'tool_pushpull', "Push/Pull батча граней (#{n} шт.)",
+                'ms', p['iters'], entities: n, ops: n,
+                params: { 'batch' => n, 'op' => 'pushpull ±40 мм', 'native_tool' => 'Push/Pull' }) do |i|
+          h = i.even? ? 40.mm : -40.mm
+          g.entities.grep(Sketchup::Face).first(n).each { |f| f.pushpull(h) }
+        end
+      end
+
+      # Move / Rotate / Scale: пакетные трансформации инстансов одним вызовом
+      # Entities#transform_entities (фигура возвращается на место каждую
+      # нечётную итерацию — чётные повторы восстанавливают исходное положение).
+      def test_tool_transforms(model, p)
+        n = p['tools']['inst']
+        g = model.entities.add_group
+        defn = model.definitions.add('dn1_tool_box')
+        face = defn.entities.add_face([0, 0, 0], [100.mm, 0, 0], [100.mm, 100.mm, 0], [0, 100.mm, 0])
+        face.pushpull(80.mm)
+        insts = n.times.map do |k|
+          x = (k % 40) * 200.mm
+          y = ((k / 40) % 40) * 200.mm
+          g.entities.add_instance(defn, Geom::Transformation.new([x, y, 0]))
+        end
+
+        measure('tools', 'tool_move', "Перемещение батча инстансов (#{n} шт.)",
+                'ms', p['iters'], entities: n, ops: n,
+                params: { 'batch' => n, 'op' => 'transform_entities: сдвиг ±50 мм',
+                          'native_tool' => 'Move' }) do |i|
+          dx = i.even? ? 50.mm : -50.mm
+          g.entities.transform_entities(Geom::Transformation.translation([dx, 0, 0]), insts)
+        end
+
+        measure('tools', 'tool_rotate', "Поворот батча инстансов (#{n} шт.)",
+                'ms', p['iters'], entities: n, ops: n,
+                params: { 'batch' => n, 'op' => 'transform_entities: поворот ±10° вокруг Z',
+                          'native_tool' => 'Rotate' }) do |i|
+          ang = i.even? ? 10.degrees : -10.degrees
+          g.entities.transform_entities(Geom::Transformation.rotation([0, 0, 0], [0, 0, 1], ang), insts)
+        end
+
+        measure('tools', 'tool_scale', "Масштаб батча инстансов (#{n} шт.)",
+                'ms', p['iters'], entities: n, ops: n,
+                params: { 'batch' => n, 'op' => 'transform_entities: масштаб ×1.05 / ÷1.05',
+                          'native_tool' => 'Scale' }) do |i|
+          s = i.even? ? 1.05 : 1.0 / 1.05
+          g.entities.transform_entities(Geom::Transformation.scaling(ORIGIN, s), insts)
+        end
+      end
+
+      # Follow Me: профиль следует по ломаной дуге (Face#followme).
+      def test_tool_followme(model, p)
+        n = p['tools']['followme']
+        measure_op('tools', 'tool_followme', "Follow Me: профиль по дуге (#{n} путей)",
+                   'ms', p['iters'],
+                   entities: n * 4, ops: n,
+                   params: { 'paths' => n, 'path' => 'четверть окружности из 12 отрезков',
+                             'profile' => 'квадрат 60×60 мм', 'native_tool' => 'Follow Me' },
+                   setup: proc { |i|
+                     group = model.entities.add_group
+                     edges = []
+                     pts = 13.times.map do |k|
+                       ang = k * Math::PI / 24
+                       [(Math.cos(ang) * 500.mm), (Math.sin(ang) * 500.mm), ((i + 1) * 10_000).mm]
+                     end
+                     pts.each_cons(2) { |a, b| edges << group.entities.add_line(a, b) }
+                     face = group.entities.add_face([0, 0, 10_000.mm], [0, 60.mm, 10_000.mm],
+                                                    [0, 60.mm, 10_060.mm], [0, 0, 10_060.mm])
+                     { 'group' => group, 'face' => face, 'edges' => edges,
+                       'before' => group.entities.size }
+                   },
+                   check: proc { |_res, ctx|
+                     ctx['group'].entities.size > ctx['before'] ? [] : ['тело не построено']
+                   },
+                   cleanup: proc { |_res, ctx|
+                     model.entities.erase_entities([ctx['group']]) if ctx['group'].valid?
+                   }) do |ctx, _i|
+          ctx['face'].followme(ctx['edges'])
+        end
+      end
+
+      # Intersect Faces: две сетки боксов, пересечение в контексте группы.
+      def test_tool_intersect(model, p)
+        n = p['tools']['intersect']
+        identity = Geom::Transformation.new
+        measure_op('tools', 'tool_intersect', "Intersect Faces: две сетки боксов (по #{n})",
+                   'ms', p['iters'],
+                   entities: n * 2, ops: n * 2,
+                   params: { 'boxes_each' => n, 'op' => 'Entities#intersect_with(recurse=true)',
+                             'native_tool' => 'Intersect Faces' },
+                   setup: proc { |i|
+                     group = model.entities.add_group
+                     a = group.entities.add_group
+                     b = group.entities.add_group
+                     [a, b].each_with_index do |gr, gi|
+                       n.times do |k|
+                         x = (k % 8) * 300.mm + (gi * 150).mm
+                         y = ((k / 8) % 8) * 300.mm + (gi * 150).mm
+                         z = ((i + 1) * 20_000).mm
+                         face = gr.entities.add_face([x, y, z], [x + 200.mm, y, z],
+                                                     [x + 200.mm, y + 200.mm, z], [x, y + 200.mm, z])
+                         face.pushpull(200.mm)
+                       end
+                     end
+                     [group, a, b]
+                   },
+                   check: proc { |edges, _ctx|
+                     edges.is_a?(Array) && !edges.empty? ? [] : ['рёбер пересечения не создано']
+                   },
+                   cleanup: proc { |(group, _a, _b), _ctx|
+                     model.entities.erase_entities([group]) if group.valid?
+                   }) do |(group, a, b), _i|
+          group.entities.intersect_with(true, identity, a.entities, identity, false, b.entities.to_a)
+        end
+      end
+
+      # Paint Bucket: назначение цветных материалов батчу граней.
+      def test_tool_paint(model, p)
+        n = p['tools']['paint']
+        g = model.entities.add_group
+        n.times do |k|
+          x = (k % 40) * 200.mm
+          y = ((k / 40) % 40) * 200.mm
+          g.entities.add_face([x, y, 0], [x + 150.mm, y, 0], [x + 150.mm, y + 150.mm, 0], [x, y + 150.mm, 0])
+        end
+        measure('tools', 'tool_paint', "Paint Bucket: окраска батча граней (#{n} шт.)",
+                'ms', p['iters'], entities: n, ops: n,
+                params: { 'batch' => n, 'op' => 'новый цветной материал + назначение граням',
+                          'native_tool' => 'Paint Bucket' }) do |i|
+          cval = (i * 47) % 255
+          mat = model.materials.add("dn1_paint_#{i}")
+          mat.color = Sketchup::Color.new(cval, (cval * 2) % 255, 255 - cval)
+          g.entities.grep(Sketchup::Face).first(n).each { |f| f.material = mat }
+        end
+      end
+
+      def test_tool_zoom_extents(model, _p)
+        view = model.active_view
+        measure('tools', 'tool_zoom_extents', 'Zoom Extents на текущей сцене',
+                'ms', @state['params']['iters'],
+                params: { 'op' => 'view.zoom_extents',
+                          'note' => 'единичный вызов вида — не кускуется, может кратко занять UI' }) do |_i|
+          view.zoom_extents
+        end
+      end
+
+      # ==========================================================================
+      # 3. VIEWPORT — FPS на тяжёлой модели (FpsTool)
+      # ==========================================================================
+
+      def plan_poly(st, model, p)
+        pp = p['poly']
+        n = pp['n']
+        segments = pp['segments']
+        st['jobs'] << [:sync, -> {
+          @state['scene_info'] = { 'n' => n, 'segments' => segments,
+                                   'defn' => Scenes.poly_cylinder_def(model, segments) }
+          log_line("poly: определение цилиндра (#{segments} сегм.) готово")
+        }]
+        build = make_task(
+          [{ 'timed' => false, 'total' => n * n, 'batch' => 256,
+             'work' => lambda { |from, to, _ctx|
+               defn = @state['scene_info']['defn']
+               from.upto(to - 1) { |i| Scenes.poly_instance(model, defn, n, i) }
+             } }],
+          lambda { |_t, _ph, _ctx| log_line("poly: #{n * n} инстансов цилиндров") }
+        )
+        st['jobs'] << [:task, build]
+        st['jobs'] << [:sync, -> { st['result'] = "ok: poly (#{n * n} цилиндров)" }]
+      end
 
       def fps_start(step)
         return 'нет активного прогона' if @state.nil?
@@ -535,32 +843,77 @@ module Dn1supBenchmark
         !@tool.nil? && !@tool.result.nil?
       end
 
+      # Лимит ожидания асинхронного шага (FPS/волна) для опроса секвенсора:
+      # с запасом относительно длительности волны.
+      def async_step_limit
+        return 30.0 if @state.nil?
+
+        (@state['params']['wave_s'].to_f * 3.0).clamp(30.0, 180.0)
+      end
+
       def fps_collect
         return 'нет активного FPS-замера' if @tool.nil?
 
         step = @fps_step
         result = @tool.result || @tool.stop_now
         fps_stop_tool
+        group = step['kind'] == 'wave' ? 'animation' : 'viewport'
         if cancelled?
-          add_skipped('graphics', step['id'], step['name'], 'отменено пользователем', status: 'cancelled')
+          add_skipped(group, step['id'], step['name'], 'отменено пользователем', status: 'cancelled')
           return 'cancelled'
         end
         if result.nil? || result['frames'].to_i.zero?
-          rec = add_result('graphics', step['id'], step['name'], 'fps', [],
-                           status: 'failed',
-                           diagnostics: [{ 'class' => 'RuntimeError', 'message' => 'кадры не отрисовались', 'backtrace' => [] }])
+          add_result(group, step['id'], step['name'], 'fps', [],
+                     status: 'failed',
+                     diagnostics: [{ 'class' => 'RuntimeError', 'message' => 'кадры не отрисовались', 'backtrace' => [] }])
           log_line("#{step['id']}: кадры не отрисовались")
-          return rec
+          return 'failed'
         end
-        add_result('graphics', step['id'], step['name'], 'fps',
+        if step['kind'] == 'wave'
+          collect_wave(result)
+        else
+          collect_fps(step, result)
+        end
+      end
+
+      def collect_fps(step, result)
+        add_result('viewport', step['id'], step['name'], 'fps',
                    [result['fps']], higher: true,
-                   entities: result['frames'],
-                   params: { 'duration_s' => result['elapsed_s'],
-                             'transition_time' => 'настройка приложения, через API недоступна',
-                             'source' => 'счётчик кадров Tool#draw + view.invalidate (Ruby-сторона, не GPU-счётчик)' },
+                   entities: fps_scene_entities,
+                   params: fps_scene_params.merge(
+                     'duration_s' => result['elapsed_s'],
+                     'source' => 'счётчик кадров Tool#draw + view.invalidate (Ruby-сторона, не GPU-счётчик)',
+                     'window' => 'окно SketchUp должно быть видимым: свёрнутое/перекрытое окно не отрисовывает кадры'
+                   ),
                    extra: { 'frames' => result['frames'], 'elapsed_s' => result['elapsed_s'], 'mode' => result['mode'] })
         log_line("#{step['id']}: #{result['fps']} fps (#{result['frames']} кадров)")
         "ok: #{result['fps']} fps"
+      end
+
+      def fps_scene_entities
+        info = @state['scene_info'] || {}
+        case @state['scene']
+        when 'diverse'
+          (info['instances'] || []).count { |i| i.respond_to?(:valid?) && i.valid? }
+        when 'poly' then info['n'].to_i**2
+        else nil
+        end
+      end
+
+      def fps_scene_params
+        info = @state['scene_info'] || {}
+        case @state['scene']
+        when 'diverse'
+          { 'scene' => 'уникальные компоненты в вложенных сборках',
+            'grid' => info['grid'], 'leaves_per_assembly' => info['leaves'] }
+        when 'poly'
+          n = info['n'].to_i
+          seg = info['segments'].to_i
+          { 'scene' => 'сетка цилиндров (полигональная нагрузка)',
+            'segments' => seg, 'triangles' => n * n * (2 * seg + 2) }
+        else
+          { 'scene' => @state['scene'].to_s }
+        end
       end
 
       def fps_stop_tool
@@ -575,109 +928,386 @@ module Dn1supBenchmark
         nil
       end
 
-      # -- DOC-01/02 --------------------------------------------------------------------
+      # ==========================================================================
+      # 4. ANIMATION — волна из кубиков 100×100×100 мм (WaveTool)
+      # ==========================================================================
 
-      # Контрольная модель = определение с фиксированными боксами, сохранённое
-      # через ComponentDefinition#save_copy во временную папку. Пользовательская
-      # модель не сохраняется и не перезаписывается; после открытия фикстура
-      # закрывается без сохранения. Файловый кэш ОС тёплый — «холодный запуск»
-      # НЕ заявляется (см. параметры теста).
-      def run_doc_tests
+      def plan_wave(st, model, p)
+        grid = p['wave']['grid']
+        st['jobs'] << [:sync, -> {
+          @state['scene_info'] = { 'defn' => Scenes.wave_cube_def(model), 'grid' => grid,
+                                   'instances' => [], 'positions' => [] }
+        }]
+        build = make_task(
+          [{ 'timed' => true, 'total' => grid * grid, 'batch' => 128,
+             'work' => lambda { |from, to, _ctx|
+               info = @state['scene_info']
+               from.upto(to - 1) do |i|
+                 inst, x, y = Scenes.wave_cube(model, info['defn'], grid, i)
+                 info['instances'] << inst
+                 info['positions'] << [x, y]
+               end
+             } }],
+          lambda { |_times, phs, _ctx|
+            info = @state['scene_info']
+            dt = phs[0]['sums'].to_f
+            add_result('animation', 'wave_build',
+                       "Построение полотна: #{grid}×#{grid} кубов 100×100×100 мм",
+                       'ms', [dt],
+                       entities: grid * grid, entities_created: grid * grid, ops: grid * grid,
+                       params: { 'grid' => grid, 'cube_mm' => 100,
+                                 'note' => 'справочное время сборки, в балл не входит' },
+                       status: 'passed')
+            log_line("wave: полотно #{grid}×#{grid} за #{(dt * 1000).round} мс")
+          }
+        )
+        st['jobs'] << [:task, build]
+        st['jobs'] << [:sync, -> { st['result'] = "ok: wave (#{grid * grid} кубов)" }]
+      end
+
+      def wave_start(step)
+        return 'нет активного прогона' if @state.nil?
+        return 'волна требует открытой сцены wave' if @state['scene'] != 'wave'
+
+        info = @state['scene_info'] || {}
+        return 'полотно волны не построено' if (info['instances'] || []).empty?
+
+        fps_stop_tool
+        view = Sketchup.active_model.active_view
+        view.zoom_extents
+        wave_s = @state['params']['wave_s']
+        @tool = WaveTool.new(wave_s, info['instances'], info['positions'])
+        @fps_step = step
+        Sketchup.active_model.select_tool(@tool)
+        "started: волна #{info['grid']}×#{info['grid']} (#{wave_s}s)"
+      end
+
+      def collect_wave(result)
+        info = @state['scene_info'] || {}
+        grid = info['grid'].to_i
+        cubes = grid * grid
+        add_result('animation', 'fps_wave_orbit', 'Волна + вращение камеры: FPS', 'fps',
+                   [result['fps']], higher: true, entities: cubes,
+                   params: { 'grid' => grid, 'cubes' => cubes, 'cube_mm' => 100,
+                             'amplitude_mm' => WaveTool::AMPLITUDE_MM,
+                             'wavelength_cells' => WaveTool::WAVELENGTH_CELLS,
+                             'period_s' => WaveTool::PERIOD_S,
+                             'duration_s' => result['elapsed_s'],
+                             'wave' => 'z = A·sin(2π(x+y)/λ − 2πt/T), диагональная бегущая',
+                             'camera' => 'полный оборот 360° вокруг полотна',
+                             'source' => 'счётчик кадров Tool#draw + view.invalidate (Ruby-сторона, не GPU-счётчик)' },
+                   extra: { 'frames' => result['frames'], 'elapsed_s' => result['elapsed_s'] })
+        updates = result['update_ms'] || []
+        unless updates.empty?
+          add_result('animation', 'wave_update_ms',
+                     "Волна: пакетное обновление геометрии (#{cubes} кубов, ~#{WaveTool::TIMER_HZ.round} Гц)",
+                     'ms', updates.map { |ms| ms / 1000.0 },
+                     entities: cubes, ops: cubes,
+                     params: { 'cubes' => cubes, 'timer_hz' => WaveTool::TIMER_HZ,
+                               'op' => 'дельты z по корзинам 1 мм → Entities#transform_entities',
+                               'samples' => updates.size })
+        end
+        log_line("волна: #{result['fps']} fps, обновлений #{updates.size}")
+        "ok: волна #{result['fps']} fps"
+      end
+
+      # ==========================================================================
+      # 5. STORAGE — файл ~500 МБ: сборка, калибровка, сохранение ×2, открытие
+      # ==========================================================================
+      # Модель собирается в ОПРЕДЕЛЕНИЕ dn1_storage текущей модели (внутри
+      # undo-операции сцены; без инстансов — вьюпорт не нагружается) и
+      # выгружается ComponentDefinition#save_copy во временную папку: модель
+      # пользователя не сохраняется и не перезаписывается. Размер добирается
+      # шумовыми PNG-текстурами 4096² (материалы назначаются граням — без
+      # назначения материал в файл не попадает). Тест открытия идёт ОТДЕЛЬНЫМ
+      # шагом после close_scene: файл открывается в новой вкладке и
+      # закрывается — смена модели только вне открытой операции (паттерн
+      # DOC-тестов 0.2–0.3).
+
+      def plan_storage(st, model, p)
+        st['jobs'] << [:sync, -> { storage_setup(st, model, p) }]
+        st['jobs'] << [:sync, -> { storage_calibration(st, model, p) }]
+        st['jobs'] << [:sync, -> { storage_timed_saves(st, p) }]
+        st['jobs'] << [:sync, -> {
+          sg = st['storage']
+          @state['scene_info'] = { 'path' => sg['path'], 'size' => sg['bytes'] }
+          st['result'] = "ok: storage (#{(sg['bytes'] / 1_048_576.0).round} МБ)"
+        }]
+      end
+
+      def storage_setup(st, model, p)
+        target_mb = p['target_mb'].to_f
+        dir = PngGen.mkdir_p(File.join(PngGen.temp_root, 'storage'))
+        path = File.join(dir, "big_#{Time.now.strftime('%Y%m%d-%H%M%S')}.skp")
+        need = (target_mb * 1_048_576 * 2.2).round
+        free = disk_free_bytes(dir)
+        if free && free < need
+          msg = "недостаточно места на диске: свободно #{(free / 1_048_576.0).round} МБ, " \
+                "нужно ~#{(need / 1_048_576.0).round} МБ"
+          log_line("storage: #{msg}")
+          add_result('storage', 'storage_save', 'Сохранение файла ~500 МБ', 'ms', [],
+                     status: 'failed',
+                     params: { 'error' => msg }, diagnostics: [diag_hash(RuntimeError.new(msg))])
+          add_result('storage', 'storage_open', 'Открытие файла ~500 МБ', 'ms', [],
+                     status: 'failed',
+                     params: { 'error' => msg }, diagnostics: [diag_hash(RuntimeError.new(msg))])
+          st['storage'] = { 'path' => nil, 'bytes' => 0 }
+          st['jobs'].clear
+          st['result'] = "пропущено: #{msg}"
+          return
+        end
+        defn = model.definitions.add('dn1_storage')
+        st['storage'] = { 'path' => path, 'defn' => defn, 'tex' => 0, 'bytes' => 0,
+                          'mats' => [], 'faces' => nil }
+        sp = p['storage']
+        boxes = sp['boxes']
+        log_line("storage: цель ~#{target_mb.round} МБ, коробок #{boxes}, " \
+                 "текстуры до #{sp['max_tex']}×#{sp['tex_size']}²")
+        geom = make_task(
+          [{ 'timed' => true, 'total' => boxes, 'batch' => [boxes, 200].min,
+             'work' => lambda { |from, to, _ctx|
+               defn = st['storage']['defn']
+               from.upto(to - 1) { |k| Scenes.storage_box(defn, k) }
+             } }],
+          lambda { |_times, phs, _ctx|
+            dt = phs[0]['sums'].to_f
+            sg = st['storage']
+            sg['faces'] = sg['defn'].entities.grep(Sketchup::Face)
+            add_result('storage', 'storage_build',
+                       "Сборка модели: #{boxes} уникальных тел",
+                       'ms', [dt], entities: sg['faces'].size, ops: boxes,
+                       params: { 'boxes' => boxes, 'unique' => true,
+                                 'note' => 'справочное время сборки, в балл не входит' },
+                       status: 'passed')
+            log_line("storage: геометрия #{(dt * 1000).round} мс")
+          }
+        )
+        queue_front(st, [:task, geom])
+      end
+
+      # Калибровка размера: сохранение после геометрии; если файл меньше
+      # 0.9×цели — пробная текстура (замер её вклада), затем добор пачкой.
+      def storage_calibration(st, model, p)
+        sg = st['storage']
+        return if sg['path'].nil?
+
+        target = (p['target_mb'] * 1_048_576).round
+        sp = p['storage']
+        sg['defn'].save_copy(sg['path'])
+        sg['bytes'] = File.size(sg['path'])
+        log_line("storage: геометрия дала #{mb_str(sg['bytes'])}")
+        return if sg['bytes'] >= target * 0.9
+
+        # Текстура + ПОСЛЕ неё проба размера (очередь атомарна: задача и
+        # следующий за ней sync идут одной очередью в правильном порядке).
+        push_texture_jobs(st, model, sp, 1, -> { storage_probe_result(st, model, p) })
+      end
+
+      def storage_probe_result(st, model, p)
+        sg = st['storage']
+        return if sg['path'].nil?
+
+        target = (p['target_mb'] * 1_048_576).round
+        sp = p['storage']
+        storage_assign_materials(model, sg)
+        sg['defn'].save_copy(sg['path'])
+        size1 = File.size(sg['path'])
+        per_tex = size1 - sg['bytes']
+        sg['bytes'] = size1
+        log_line("storage: +1 текстура = #{mb_str(per_tex)} → #{mb_str(size1)}")
+        return if size1 >= target * 0.9 || per_tex <= 0
+
+        more = ((target - size1) / per_tex).ceil
+        more = [more, sp['max_tex'] - sg['tex']].min
+        return unless more.positive?
+
+        push_texture_jobs(st, model, sp, more, -> { storage_assign_materials(model, st['storage']) })
+      end
+
+      # Задача добавления count текстур: PNG генерируется КУСОЧНО (строки
+      # порциями ~1 с, сжатие инкрементально; UI отвечает, отмена работает),
+      # затем материал назначается граням (вне тайминга — это setup файла).
+      # follow_sync — работа, встающая в очередь СРАЗУ ПОСЛЕ текстур.
+      def push_texture_jobs(st, model, sp, count, follow_sync = nil)
+        size = sp['tex_size']
+        first = st['storage']['tex']
+        phases = count.times.map do |j|
+          idx = first + j
+          { 'timed' => false, 'total' => size, 'batch' => 200,
+            'work' => lambda { |from, to, ctx|
+              w = ((ctx['writers'] ||= {})[idx] ||= PngGen::NoiseWriter.new(storage_tex_path(idx, size), size, idx))
+              w.tick(from, to)
+            },
+            'on_done' => lambda { |ctx|
+              w = ctx['writers'][idx]
+              w.finish! unless w.cached?
+              mat = model.materials.add("dn1_storage_tex_#{idx}")
+              mat.texture = storage_tex_path(idx, size)
+              st['storage']['mats'] << mat
+            } }
+        end
+        task = make_task(phases, lambda { |_t, _ph, _ctx|
+          st['storage']['tex'] += count
+          log_line("storage: текстур готово #{st['storage']['tex']}")
+        })
+        jobs = [[:task, task]]
+        jobs << [:sync, follow_sync] if follow_sync
+        queue_front(st, *jobs)
+      end
+
+      def storage_tex_path(idx, size)
+        File.join(PngGen.texture_dir, "noise_#{size}_#{idx}.png")
+      end
+
+      def storage_assign_materials(model, sg)
+        mats = sg['mats']
+        return if mats.empty?
+
+        faces = sg['faces'] || sg['defn'].entities.grep(Sketchup::Face)
+        return if faces.empty?
+
+        faces.each_with_index { |f, k| f.material = mats[k % mats.size] }
+      end
+
+      def storage_timed_saves(st, p)
+        sg = st['storage']
+        return if sg['path'].nil?
+
+        path = sg['path']
+        times = []
+        2.times do
+          raise Cancelled if cancelled?
+
+          t0 = Dn1supBenchmark.monotonic
+          sg['defn'].save_copy(path)
+          times << (Dn1supBenchmark.monotonic - t0)
+          sg['bytes'] = File.size(path) if File.exist?(path)
+        end
+        med_s = median(times)
+        mbps = med_s && med_s.positive? ? (sg['bytes'] / 1_048_576.0) / med_s : nil
+        add_result('storage', 'storage_save',
+                   "Сохранение файла #{(sg['bytes'] / 1_048_576.0).round} МБ (save ×2)",
+                   'ms', times,
+                   entities: sg['faces'] ? sg['faces'].size : nil, ops: 1,
+                   file_size: sg['bytes'],
+                   params: { 'target_mb' => @state['params']['target_mb'],
+                             'boxes' => @state['params']['storage']['boxes'],
+                             'textures' => sg['tex'],
+                             'op' => 'ComponentDefinition#save_copy',
+                             'path' => 'временная папка пользователя',
+                             'cache' => 'файловый кэш ОС тёплый; «холодный» запуск не заявляется',
+                             'note' => 'сохранение атомарно — UI кратко блокируется' },
+                   extra: { 'mb_per_s' => mbps&.round(1),
+                            'file_mb' => (sg['bytes'] / 1_048_576.0).round(1) })
+        log_line("storage: сохранение #{mb_str(sg['bytes'])} за #{((med_s || 0) * 1000).round} мс")
+      end
+
+      # Открытие собранного файла (отдельный шаг): сцена уже закрыта, файл
+      # открывается в новой вкладке, валидируется и закрывается без сохранения.
+      def storage_open_tests
         return 'нет активного прогона' if @state.nil?
 
-        params = @state['params']
-        return add_skipped('documents', 'DOC-01', 'Сохранение контрольной модели', 'отключено в настройках') unless params['doc_enabled']
+        info = @state['scene_info'] || {}
+        if info['path'].nil?
+          return add_skipped('storage', 'storage_open', 'Открытие файла ~500 МБ',
+                             cancelled? ? 'отменено пользователем' : 'файл не был собран',
+                             status: cancelled? ? 'cancelled' : 'skipped')
+        end
 
-        close_scene
+        path = info['path']
+        size = info['size'].to_i
+        close_scene # откат сборки: файл уже на диске
         model = Sketchup.active_model
         raise 'нет активной модели' if model.nil?
 
-        orig_model = model
-        dir = PngGen.mkdir_p(File.join(PngGen.temp_root, 'docs'))
-        stamp = Time.now.strftime('%Y%m%d-%H%M%S')
-        fixture_path = File.join(dir, "fixture_#{stamp}.skp")
-        save_path = File.join(dir, "saved_#{stamp}.skp")
-        boxes = 60
-        iters = [params['iters'], 3].min
-
+        orig = model
+        opens = []
+        diag = []
+        val = []
+        iters = [@state['params']['iters'], 2].min
         begin
-          build_doc_fixture(model, fixture_path, boxes)
-          file_size = File.size(fixture_path)
-          expected_faces = boxes * 6
-
-          # DOC-02: открытие (каждый повтор: open → валидация → close)
-          opens = []
-          diag = []
-          val = []
           iters.times do |i|
             raise Cancelled if cancelled?
 
             t0 = Dn1supBenchmark.monotonic
-            ok = Sketchup.open_file(fixture_path)
+            open_file_status(path)
             t1 = Dn1supBenchmark.monotonic
             opened = Sketchup.active_model
-            if !ok || opened.nil? || opened == orig_model
+            if opened.nil? || opened.equal?(orig)
               val << "открытие #{i}: open_file не создал новую модель"
               next
             end
-            n = opened.entities.grep(Sketchup::Face).size
-            val << "открытие #{i}: граней #{n} вместо #{expected_faces}" if n != expected_faces
+            n = opened.entities.size
+            val << "открытие #{i}: сущностей #{n} (ожидали > 0)" unless n.positive?
             opened.close(true)
             opens << (t1 - t0)
           rescue StandardError => e
             diag << diag_hash(e)
           end
-          add_result('documents', 'DOC-02', 'Открытие контрольной модели', 'ms', opens,
-                     params: doc_params(fixture_path, file_size),
-                     file_size: file_size,
+          med_s = median(opens)
+          mbps = med_s && med_s.positive? ? (size / 1_048_576.0) / med_s : nil
+          add_result('storage', 'storage_open',
+                     "Открытие файла #{(size / 1_048_576.0).round} МБ", 'ms', opens,
+                     ops: 1, file_size: size,
+                     params: { 'target_mb' => @state['params']['target_mb'],
+                               'op' => 'Sketchup.open_file + close(true)',
+                               'cache' => 'файловый кэш ОС тёплый; «холодный» запуск не заявляется',
+                               'note' => 'открытие атомарно — UI блокируется на время загрузки' },
+                     extra: { 'mb_per_s' => mbps&.round(1),
+                              'file_mb' => (size / 1_048_576.0).round(1) },
                      diagnostics: diag, validation_errors: val,
                      status: status_for(opens, diag, val))
-
-          # DOC-01: сохранение (модель открыта один раз, save ×iters)
-          saves = []
-          sizes = []
-          diag = []
-          val = []
-          begin
-            raise Cancelled if cancelled?
-
-            ok = Sketchup.open_file(fixture_path)
-            opened = Sketchup.active_model
-            raise 'контрольная модель не открылась' if !ok || opened.nil? || opened == orig_model
-
-            iters.times do |i|
-              raise Cancelled if cancelled?
-
-              t0 = Dn1supBenchmark.monotonic
-              opened.save(save_path)
-              t1 = Dn1supBenchmark.monotonic
-              saves << (t1 - t0)
-              sizes << (File.exist?(save_path) ? File.size(save_path) : 0)
-            end
-            opened.close(true)
-          rescue Cancelled
-            raise
-          rescue StandardError => e
-            diag << diag_hash(e)
-          end
-          add_result('documents', 'DOC-01', 'Сохранение контрольной модели', 'ms', saves,
-                     params: doc_params(save_path, sizes.last).merge('size_bytes_repeats' => sizes),
-                     file_size: sizes.last,
-                     diagnostics: diag, validation_errors: val,
-                     status: status_for(saves, diag, val))
+          log_line("storage: открытие #{mb_str(size)} (#{opens.size} повторов)")
         ensure
-          # Если фикстура осталась открыта (исключение посередине) — закрываем.
           cur = Sketchup.active_model rescue nil
-          if cur && cur != orig_model
+          if cur && !cur.equal?(orig)
             begin
               cur.close(true)
             rescue StandardError
               nil
             end
           end
-          log_line("DOC: файлы в #{dir} (не удаляются — можно посмотреть вручную)")
+          begin
+            File.delete(path) if File.exist?(path)
+          rescue StandardError
+            nil
+          end
         end
-        'ok: DOC-01/02'
+        'ok: storage_open'
+      end
+
+      def mb_str(bytes)
+        "#{(bytes.to_f / 1_048_576.0).round(1)} МБ"
+      end
+
+      # open_file без предупреждения о устаревшей перегрузке (SU2024+
+      # рекомендует with_status: true; на старых версиях — обычный вызов).
+      def open_file_status(path)
+        if Sketchup.version.to_i >= 24
+          Sketchup.open_file(path, with_status: true)
+        else
+          Sketchup.open_file(path)
+        end
+      rescue ArgumentError
+        Sketchup.open_file(path)
+      end
+
+      # Свободное место на диске (GetDiskFreeSpaceExW через Fiddle; вне
+      # Windows или при сбое — nil, проверка пропускается).
+      def disk_free_bytes(dir)
+        return nil unless RUBY_PLATFORM.match?(/mingw|mswin|win32/) && defined?(Fiddle)
+
+        ptr = [0].pack('Q<')
+        total = [0].pack('Q<')
+        path = (dir.to_s.gsub('/', '\\') + "\\").encode('UTF-16LE').force_encoding('ASCII-8BIT')
+        fn = Fiddle::Function.new(Fiddle.dlopen('kernel32.dll')['GetDiskFreeSpaceExW'],
+                                  [Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP,
+                                   Fiddle::TYPE_VOIDP, Fiddle::TYPE_VOIDP],
+                                  Fiddle::TYPE_INT)
+        ok = fn.call(path, ptr, total, nil)
+        ok.nonzero? ? ptr.unpack1('Q<') : nil
+      rescue StandardError
+        nil
       end
 
       # -- финал ------------------------------------------------------------------------
@@ -714,390 +1344,6 @@ module Dn1supBenchmark
       # Данные последнего завершённого прогона (для вкладки «Результаты»).
       def last_run_data
         @last_run_data
-      end
-
-      # -- сцена nested: иерархия --------------------------------------------------------
-
-      def tests_nested(model, params)
-        path = @state['scene_info']['path']
-
-        # Полный цикл: спуск до дна иерархии, подъём обратно. Одна итерация =
-        # один цикл. Синхронный вызов active_path= — само ядро навигации.
-        measure('api', 'hierarchy_open_close', 'Вход/выход: полный спуск-подъём (6 уровней)',
-                'ms', params['iters'],
-                entities: path.size, params: { 'depth' => path.size }) do |_i|
-          path.each_index do |d|
-            set_active_path(model, path[0..d])
-          end
-          (path.size - 1).downto(0) do |d|
-            set_active_path(model, d.zero? ? [] : path[0..d - 1])
-          end
-          leave_edit_context(model)
-        end
-
-        # Пошаговый спуск: замер каждого уровня отдельно.
-        times = []
-        path.each_index do |d|
-          t0 = Dn1supBenchmark.monotonic
-          set_active_path(model, path[0..d])
-          times << Dn1supBenchmark.monotonic - t0
-        end
-        leave_edit_context(model)
-        add_result('api', 'hierarchy_step_dive', 'Пошаговый спуск по уровням (медиана шага)',
-                   'ms', times, entities: path.size, params: { 'depth' => path.size })
-      end
-
-      # -- сцена basics: API-01/02/03/05 ---------------------------------------------------
-      # API-01 и API-03 — кусочные задачи (тяжёлые: сотни тысяч вызовов API);
-      # API-02 и API-05 — синхронные (лёгкие). План собирается в plan_basics.
-
-      def plan_basics(st, model, p)
-        st['jobs'] << [:task, api01_task(model, p['api01_loops'], p['iters'])]
-        st['jobs'] << [:sync, -> { test_api02(model, p) }]
-        # Определения для API-03 — дешёвый setup: строим сразу при
-        # планировании (аргумент задачи вычисляется здесь же, а не в тике).
-        defs = build_api03_defs(model, p['api03_defs'])
-        st['jobs'] << [:task, api03_task(model, defs, p['api03_instances'], p['iters'])]
-        st['jobs'] << [:sync, -> {
-          test_api05(model, p)
-          st['result'] = 'ok: basics'
-        }]
-      end
-
-      def api01_loop(model, k)
-        x = (k % 500) * 300
-        y = (k / 500) * 300
-        p1 = [x, y, 0]
-        p2 = [x + 100, y, 0]
-        p3 = [x + 100, y + 100, 0]
-        p4 = [x, y + 100, 0]
-        ents = model.entities
-        [ents.add_line(p1, p2), ents.add_line(p2, p3),
-         ents.add_line(p3, p4), ents.add_line(p4, p1), ents.add_face(p1, p2, p3, p4)]
-      end
-
-      # API-01: создание рёбер и граней. Итерация = фаза создания (таймирована
-      # по кускам; длительность итерации = сумма кусков) + фаза стирания
-      # (вне замера, порциями). Валидация — подсчёт невалидных ссылок при
-      # стирании; ошибки копятся в ctx['val'].
-      def api01_task(model, loops, iters)
-        phases = []
-        iters.times do |i|
-          phases << {
-            'iter' => i, 'timed' => true, 'total' => loops, 'batch' => [loops, 400].min,
-            'work' => ->(from, to, ctx) {
-              refs = (ctx['refs'] ||= [])
-              from.upto(to - 1) { |k| refs.concat(api01_loop(model, k)) }
-            }
-          }
-          phases << {
-            'iter' => i, 'timed' => false, 'total' => 5 * loops, 'batch' => [5 * loops, 20_000].min,
-            'work' => lambda { |from, to, ctx|
-              slice = ctx['refs'][from...to]
-              keep = slice.select(&:valid?)
-              ctx['invalid'] = (ctx['invalid'] || 0) + (slice.size - keep.size)
-              model.entities.erase_entities(keep) unless keep.empty?
-            },
-            'on_done' => ->(ctx) {
-              if (ctx['invalid'] || 0).positive?
-                (ctx['val'] ||= []) << "итерация #{i}: невалидных сущностей #{ctx['invalid']} вместо 0"
-              end
-              ctx['refs'] = []
-              ctx['invalid'] = 0
-              GC.start
-            }
-          }
-        end
-        make_task(phases, ->(_times, phs, ctx) {
-          iters_times = phs.select { |ph| ph['timed'] }.map { |ph| ph['sums'].to_f }
-          val = ctx['val'] || []
-          add_result('api', 'API-01', "Создание рёбер и граней (#{loops} контуров × 4 ребра)",
-                     'ms', iters_times,
-                     entities: 5 * loops, entities_created: 5 * loops, ops: 5 * loops,
-                     params: { 'loops' => loops, 'edges_per_loop' => 4, 'target_edges' => 4 * loops,
-                               'execution' => 'кусками ~1 с (UI отвечает, отмена активна)' },
-                     diagnostics: [], validation_errors: val,
-                     status: status_for(iters_times, [], val))
-        })
-      end
-
-      # API-02: группы (лёгкий тест — синхронно через measure).
-      def test_api02(model, params)
-        ents = model.entities
-        n_groups = params['api02_groups']
-        measure('api', 'API-02', "Создание групп (#{n_groups} групп с гранью)",
-                'ms', params['iters'],
-                entities: n_groups, entities_created: n_groups, ops: n_groups,
-                params: { 'groups' => n_groups, 'content' => 'уникальная группа + грань' },
-                validate: proc do |groups|
-                  nv = groups.count(&:valid?)
-                  nv == groups.size ? [] : ["групп валидных #{nv} вместо #{groups.size}"]
-                end,
-                cleanup: proc { |groups| ents.erase_entities(groups.select(&:valid?)) }) do |_i|
-          groups = []
-          n_groups.times do |k|
-            g = ents.add_group
-            g.name = "dn1_g_#{k}"
-            x = (k % 100) * 200
-            y = 1_000_000 + (k / 100) * 200 # далеко от зоны API-01
-            g.entities.add_face([x, y, 0], [x + 100, y, 0], [x + 100, y + 100, 0], [x, y + 100, 0])
-            groups << g
-          end
-          groups
-        end
-      end
-
-      # API-03: определения компонентов и экземпляры (кусочно; определения —
-      # setup вне замера, переиспользуются всеми экземплярами).
-      def api03_task(model, defs, n_inst, iters)
-        defs ||= []
-        phases = []
-        iters.times do |i|
-          phases << {
-            'iter' => i, 'timed' => true, 'total' => n_inst, 'batch' => [n_inst, 2_000].min,
-            'work' => ->(from, to, ctx) {
-              refs = (ctx['refs'] ||= [])
-              ents = model.entities
-              from.upto(to - 1) do |k|
-                defn = defs[k % defs.size]
-                x = (k % 100) * 400
-                y = 2_000_000 + (k / 100) * 400
-                refs << ents.add_instance(defn, Geom::Transformation.new([x, y, 0]))
-              end
-            }
-          }
-          phases << {
-            'iter' => i, 'timed' => false, 'total' => n_inst, 'batch' => [n_inst, 20_000].min,
-            'work' => lambda { |from, to, ctx|
-              slice = ctx['refs'][from...to]
-              keep = slice.select(&:valid?)
-              ctx['invalid'] = (ctx['invalid'] || 0) + (slice.size - keep.size)
-              model.entities.erase_entities(keep) unless keep.empty?
-            },
-            'on_done' => ->(ctx) {
-              if (ctx['invalid'] || 0).positive?
-                (ctx['val'] ||= []) << "итерация #{i}: валидных инстансов не хватает (#{ctx['invalid']})"
-              end
-              ctx['refs'] = []
-              ctx['invalid'] = 0
-            }
-          }
-        end
-        make_task(phases, ->(_times, phs, ctx) {
-          iters_times = phs.select { |ph| ph['timed'] }.map { |ph| ph['sums'].to_f }
-          val = ctx['val'] || []
-          add_result('api', 'API-03', "Экземпляры компонентов (#{n_inst} шт., #{defs.size} определений)",
-                     'ms', iters_times,
-                     entities: n_inst, entities_created: n_inst, ops: n_inst,
-                     params: { 'unique_definitions' => defs.size,
-                               'instances_per_repeat' => n_inst,
-                               'definition_reuse' => 'одно определение используется многими экземплярами' },
-                     diagnostics: [], validation_errors: val,
-                     status: status_for(iters_times, [], val))
-        })
-      end
-
-      # API-05: атрибуты на заранее созданных объектах (якоря вне замера).
-      def test_api05(model, params)
-        anchors = build_api05_anchors(model, params['api05_objects'])
-        measure('api', 'API-05', "Атрибуты: запись+чтение (#{anchors.size} объектов × 4 ключа)",
-                'ms', params['iters'],
-                entities: anchors.size, ops: anchors.size * 8,
-                params: { 'objects' => anchors.size, 'keys_per_object' => 4,
-                          'op' => 'set_attribute + get_attribute с проверкой обратного чтения' },
-                validate: proc { |mismatches| mismatches.zero? ? [] : ["не совпало значений: #{mismatches}"] }) do |_i|
-          mismatches = 0
-          anchors.each_with_index do |obj, k|
-            dict = 'dn1_bench'
-            obj.set_attribute(dict, 'int', k)
-            obj.set_attribute(dict, 'float', k * 0.5)
-            obj.set_attribute(dict, 'str', "v#{k}")
-            obj.set_attribute(dict, 'bool', k.even?)
-            mismatches += 1 unless obj.get_attribute(dict, 'int') == k
-            mismatches += 1 unless obj.get_attribute(dict, 'float') == k * 0.5
-            mismatches += 1 unless obj.get_attribute(dict, 'str') == "v#{k}"
-            mismatches += 1 unless obj.get_attribute(dict, 'bool') == k.even?
-          end
-          mismatches
-        end
-      end
-
-      def build_api03_defs(model, n)
-        n.times.map do |i|
-          defn = model.definitions.add("dn1_api03_#{i}")
-          w = 60 + (i % 4) * 20
-          face = defn.entities.add_face([0, 0, 0], [w, 0, 0], [w, w, 0], [0, w, 0])
-          face.pushpull(w / 2)
-          defn
-        end
-      end
-
-      def build_api05_anchors(model, n)
-        n.times.map do |k|
-          g = model.entities.add_group
-          g.name = "dn1_attr_#{k}"
-          x = (k % 100) * 200
-          y = 3_000_000 + (k / 100) * 200
-          g.entities.add_face([x, y, 0], [x + 100, y, 0], [x + 100, y + 100, 0], [x, y + 100, 0])
-          g
-        end
-      end
-
-      # -- сцена grid: API-06 + легаси-тесты + zoom ---------------------------------------
-
-      def tests_grid(model, params)
-        n = params['pushpull']
-        # Ссылки на грани НЕ переживают push/pull (ядро пересоздаёт геометрию),
-        # поэтому батч собирается заново на каждой итерации.
-        measure('api', 'pushpull_batch', "Push/pull батча граней сетки (до #{n} шт.)",
-                'ms', params['iters'], entities: n, ops: n,
-                params: { 'batch' => n, 'op' => 'pushpull +40/-40 мм' }) do |i|
-          faces = model.entities.grep(Sketchup::Face).select(&:valid?)
-          h = i.even? ? 40 : -40
-          faces.first(n).each { |f| f.pushpull(h) }
-        end
-
-        view = model.active_view
-        measure('graphics', 'zoom_extents', 'Zoom Extents на плотной сцене',
-                'ms', params['iters'], entities: model.entities.grep(Sketchup::Face).size,
-                params: { 'op' => 'view.zoom_extents',
-                          'note' => 'единичный вызов вида — не кускуется, может кратко занять UI' }) do |_i|
-          view.zoom_extents
-        end
-      end
-
-      # API-06: операции с моделью и «транзакциями». Методика (зафиксирована):
-      # вложенность 1 уровень — внутри undo-операции сцены; отдельно меряется
-      # время изменения (start→modify), фиксации (commit) и отмены (abort).
-      # Произвольной вложенности нет; поведение отмены проверяется валидацией
-      # (после abort грани обязаны стать невалидными). Кусочно: один цикл =
-      # одна порция (на large это ~секунды).
-      def api06_task(model, params)
-        m = params['api06_faces']
-        iters = params['iters']
-        base_x = @state.dig('scene_info', 'n').to_i * 100 + 2_000 # правее сетки
-        make_task(
-          [{ 'timed' => false, 'total' => iters, 'batch' => 1,
-             'work' => lambda { |from, to, ctx|
-               return if ctx['stop']
-
-               from.upto(to - 1) { |i| api06_cycle(model, base_x, m, i, ctx) }
-             } }],
-          ->(_times, _ph, ctx) {
-            GC.start
-            cycles = ctx['cycles'] || []
-            diag = ctx['diag'] || []
-            val = ctx['val'] || []
-            add_result('api', 'API-06', 'Операции с моделью: modify / commit / abort',
-                       'ms', cycles,
-                       entities: m, ops: m * 2,
-                       params: { 'faces_per_op' => m, 'mode' => 'start_operation → add_face×N → commit_operation',
-                                 'abort_path' => 'start_operation → add_face×N → abort_operation',
-                                 'nested_in_scene_op' => true, 'nested_level' => 1 },
-                       diagnostics: diag, validation_errors: val,
-                       status: status_for(cycles, diag, val),
-                       extra: { 'modify_ms' => median_ms(ctx['modify'] || []),
-                                'commit_ms' => median_ms(ctx['commits'] || []),
-                                'abort_modify_ms' => median_ms(ctx['mod_aborts'] || []),
-                                'abort_ms' => median_ms(ctx['aborts'] || []) })
-          }
-        )
-      end
-
-      def api06_cycle(model, base_x, m, i, ctx)
-        ctx['modify'] ||= []; ctx['commits'] ||= []
-        ctx['mod_aborts'] ||= []; ctx['aborts'] ||= []
-        ctx['cycles'] ||= []; ctx['val'] ||= []; ctx['diag'] ||= []
-        t0 = Dn1supBenchmark.monotonic
-        model.start_operation("dn1_bench_tx_#{i}", true)
-        faces = add_tx_faces(model, base_x, m, i)
-        t1 = Dn1supBenchmark.monotonic
-        model.commit_operation
-        t2 = Dn1supBenchmark.monotonic
-        ctx['modify'] << (t1 - t0)
-        ctx['commits'] << (t2 - t1)
-        ctx['val'] << "commit #{i}: грани не валидны после фиксации" unless faces.all?(&:valid?)
-
-        # Убираем зафиксированные грани (вне замера), чтобы следующий цикл
-        # начинался из того же состояния.
-        model.start_operation('dn1_bench_tx_cleanup', true)
-        model.entities.erase_entities(faces.select(&:valid?))
-        model.commit_operation
-
-        # Путь отмены: старт → изменение → abort.
-        t3 = Dn1supBenchmark.monotonic
-        model.start_operation("dn1_bench_tx_abort_#{i}", true)
-        faces2 = add_tx_faces(model, base_x, m, i)
-        t4 = Dn1supBenchmark.monotonic
-        model.abort_operation
-        t5 = Dn1supBenchmark.monotonic
-        ctx['mod_aborts'] << (t4 - t3)
-        ctx['aborts'] << (t5 - t4)
-        ctx['val'] << "abort #{i}: грани пережили отмену" if faces2.any?(&:valid?)
-        ctx['cycles'] << ((t2 - t0) + (t5 - t3))
-      rescue StandardError => e
-        ctx['diag'] << diag_hash(e)
-        begin
-          model.abort_operation
-        rescue StandardError
-          nil
-        end
-        ctx['stop'] = true # дальнейшие циклы бессмысленны
-      end
-
-      def add_tx_faces(model, base_x, m, salt)
-        m.times.map do |k|
-          x = base_x + (k % 200) * 150
-          y = ((k / 200) + salt) * 150
-          model.entities.add_face([x, y, 0], [x + 100, y, 0], [x + 100, y + 100, 0], [x, y + 100, 0])
-        end.compact
-      end
-
-      # -- сцена textured: легаси-тесты материалов ----------------------------------------
-
-      def tests_textured(model, params)
-        tex = PngGen.cached_textures([256, 1024, 2048])
-
-        # Загрузка текстур разных размеров в SketchUp (новый материал на итерацию).
-        [256, 1024, 2048].each do |size|
-          measure('api', "texture_load_#{size}", "Загрузка текстуры #{size}×#{size}",
-                  'ms', params['iters'], entities: size * size, ops: 1,
-                  params: { 'texture' => "#{size}x#{size}", 'source' => 'PNG из временной папки' }) do |i|
-            mat = model.materials.add("dn1_tex_#{size}_#{i}")
-            mat.texture = tex[size.to_s]
-          end
-        end
-
-        faces = model.entities.grep(Sketchup::Face)
-        apply_n = [params['tex_apply'], faces.size].min
-
-        # Батч-назначение текстурного материала на грани.
-        measure('api', 'apply_texture_batch', "Наложение текстуры на грани (батч #{apply_n})",
-                'ms', 2, entities: apply_n, ops: apply_n,
-                params: { 'batch' => apply_n }) do |i|
-          mat = model.materials.add("dn1_apply_#{i}")
-          mat.texture = tex[i.zero? ? '1024' : '256']
-          faces.first(apply_n).each { |f| f.material = mat }
-        end
-
-        # Полная перекраска сцены на другую текстуру.
-        measure('api', 'repaint_textured', "Перекраска всех граней (#{apply_n}) другой текстурой",
-                'ms', 2, entities: apply_n, ops: apply_n,
-                params: { 'batch' => apply_n }) do |i|
-          mat = model.materials.add("dn1_repaint_#{i}")
-          mat.texture = tex[i.zero? ? '256' : '2048']
-          faces.first(apply_n).each { |f| f.material = mat }
-        end
-
-        # Батч цветных материалов (без текстур).
-        measure('api', 'apply_color_batch', "Цветные материалы: назначение батчу граней (#{apply_n})",
-                'ms', params['iters'], entities: apply_n, ops: apply_n,
-                params: { 'batch' => apply_n }) do |i|
-          cval = (i * 47) % 255
-          mat = model.materials.add("dn1_color_#{i}")
-          mat.color = Sketchup::Color.new(cval, (cval * 2) % 255, 255 - cval)
-          faces.first(apply_n).each { |f| f.material = mat }
-        end
       end
 
       # -- измерительный каркас -------------------------------------------------------------
@@ -1140,6 +1386,57 @@ module Dn1supBenchmark
             rescue StandardError => e
               diag << diag_hash(e)
             end
+          end
+        end
+        GC.start
+        add_result(group, id, name, unit, times,
+                   entities: opts[:entities], entities_created: opts[:entities_created],
+                   higher: opts[:higher] || false, params: opts[:params], ops: opts[:ops],
+                   file_size: opts[:file_size], diagnostics: diag,
+                   validation_errors: val, status: status_for(times, diag, val))
+      end
+
+      # measure_op: как measure, но с setup/check/cleanup на каждую итерацию —
+      # для тестов, где фиксстру перед операцией надо строить и убирать вне
+      # замера (follow me, intersect, черчение).
+      #   setup(i)   → ctx (вне замера);
+      #   yield(ctx) → результат операции (замеряется);
+      #   check(res, ctx) → [ошибки валидации] (вне замера);
+      #   cleanup(res, ctx) (вне замера).
+      def measure_op(group, id, name, unit, iters, opts = {}, &blk)
+        times = []
+        diag = []
+        val = []
+        iters.times do |i|
+          raise Cancelled if cancelled?
+
+          ctx = nil
+          res = nil
+          begin
+            ctx = opts[:setup] ? opts[:setup].call(i) : nil
+            t0 = Dn1supBenchmark.monotonic
+            res = blk.call(ctx, i)
+            times << (Dn1supBenchmark.monotonic - t0)
+          rescue Cancelled
+            raise
+          rescue StandardError => e
+            diag << diag_hash(e)
+            log_line("#{id}: #{e.class}: #{e.message}")
+            break
+          end
+          if opts[:check]
+            begin
+              val.concat(opts[:check].call(res, ctx) || [])
+            rescue StandardError => e
+              diag << diag_hash(e)
+            end
+          end
+          next unless opts[:cleanup]
+
+          begin
+            opts[:cleanup].call(res, ctx)
+          rescue StandardError => e
+            diag << diag_hash(e)
           end
         end
         GC.start
@@ -1240,54 +1537,6 @@ module Dn1supBenchmark
 
       # -- контекст и утилиты ---------------------------------------------------------------
 
-      def scene_title(name)
-        { 'basics' => 'базовые API', 'nested' => 'вложенные группы',
-          'grid' => 'плотная сетка', 'textured' => 'текстурированные боксы' }.fetch(name, name)
-      end
-
-      def scene_params(name)
-        p = @state['params']
-        case name
-        when 'nested' then { 'depth' => p['nested']['depth'], 'items' => p['nested']['items'] }
-        when 'grid' then { 'n' => p['grid']['n'], 'expected_edges' => 2 * p['grid']['n'] * (p['grid']['n'] + 1) }
-        when 'textured' then { 'boxes' => p['textured']['boxes'] }
-        else {}
-        end
-      end
-
-      def doc_params(path, size)
-        { 'file' => File.basename(path.to_s), 'dir' => 'временная папка пользователя',
-          'file_size_bytes' => size,
-          'cache' => 'файловый кэш ОС тёплый; «холодный» запуск не заявляется' }
-      end
-
-      def build_doc_fixture(model, path, boxes)
-        model.start_operation('DN1Sup Benchmark: doc fixture', true)
-        defn = model.definitions.add('dn1_doc_fixture')
-        boxes.times do |k|
-          x = (k % 10) * 300
-          y = (k / 10) * 300
-          face = defn.entities.add_face([x, y, 0], [x + 200, y, 0], [x + 200, y + 200, 0], [x, y + 200, 0])
-          face.pushpull(100)
-        end
-        ok = defn.save_copy(path)
-        model.abort_operation
-        raise "save_copy вернул #{ok.inspect}" unless ok && File.exist?(path)
-      rescue Exception
-        begin
-          model.abort_operation
-        rescue StandardError
-          nil
-        end
-        raise
-      end
-
-      def set_active_path(model, path)
-        model.active_path = path
-      rescue StandardError
-        model.active_path = nil if path.empty?
-      end
-
       def leave_edit_context(model)
         return if model.active_path.nil? || model.active_path.empty?
 
@@ -1303,47 +1552,19 @@ module Dn1supBenchmark
       end
 
       def log_line(msg)
-        @state['log'] << "[#{Time.now.strftime('%H:%M:%S')}] #{msg}" if @state
+        line = "[#{Time.now.strftime('%H:%M:%S')}] #{msg}"
+        @state['log'] << line if @state
         puts "[dn1sup_benchmark] #{msg}"
+        # Пульс в файл: переживает падение процесса (диагностика крашей).
+        begin
+          File.open(File.join(PngGen.temp_root, 'run_heartbeat.log'), 'a') { |fh| fh.puts line }
+        rescue StandardError
+          nil
+        end
       end
 
       def deep_copy(obj)
         Marshal.load(Marshal.dump(obj))
-      end
-    end
-  end
-
-  # RUBY-01: фиксированная чистая Ruby-нагрузка (массивы, хеши, арифметика).
-  # Детерминирована, без обращения к SketchUp API; объём операций зафиксирован
-  # и записывается в результат.
-  module RubyWorkload
-    ARRAY_N = 20_000
-    HASH_N = 20_000
-    MATH_N = 200_000
-    TOTAL_OPS = ARRAY_N * 4 + HASH_N * 2 + MATH_N
-
-    class << self
-      def spec
-        { 'array_ops' => ARRAY_N * 4, 'hash_ops' => HASH_N * 2, 'math_ops' => MATH_N,
-          'total_ops' => TOTAL_OPS }
-      end
-
-      def run
-        # Массивы: построение, сортировка, преобразование, выборка.
-        a = Array.new(ARRAY_N) { |i| (i * 2_654_435_761) % 1_000_003 }
-        a.sort!
-        a.map! { |x| (x * 2) % 999_983 }
-        odd = a.select(&:odd?).size
-        # Хеши: вставка и чтение по детерминированным ключам.
-        h = {}
-        HASH_N.times { |i| h[(i * 40_503) % 999_983] = i }
-        hits = 0
-        HASH_N.times { |i| hits += 1 if h.key?((i * 7_919) % 999_983) }
-        # Арифметика: фиксированный цикл с плавающей точкой.
-        acc = 0.0
-        MATH_N.times { |j| acc = (acc + j * 0.5) % 1.0e9 }
-        # «Поглощаем» результаты, чтобы RTL не выбросил работу.
-        odd + hits + (acc > -1 ? 1 : 0)
       end
     end
   end

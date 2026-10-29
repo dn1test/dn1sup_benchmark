@@ -2,7 +2,7 @@
 # =============================================================================
 # dn1sup_benchmark/score.rb — необязательный общий балл в стиле Geekbench.
 #
-# Формула (ТЗ §3.10, §12: балл необязателен, веса и база опубликованы):
+# Формула (балл необязателен, веса и база опубликованы):
 #   балл теста   = base/value для «ms» (меньше — лучше) или value/base для
 #                  «fps» (больше — лучше); у базовой машины каждый балл = 1.0;
 #   балл категории = геометрическое среднее баллов её тестов;
@@ -13,7 +13,7 @@
 # разными профилями.
 #
 # Балл вычисляется только для профилей, у которых есть baseline-файл
-# (baseline-<profile>-v1.json рядом с кодом). Пропущенные/упавшие тесты
+# (baseline-<profile>-v4.json рядом с кодом). Пропущенные/упавшие тесты
 # дают статус partial с перечнем недостающих (не подменяются нулями).
 # =============================================================================
 
@@ -21,29 +21,30 @@ require 'json'
 
 module Dn1supBenchmark
   module Score
-    SCORE_VERSION = '1'
+    SCORE_VERSION = '2'
 
-    # Опубликованные веса категорий (сумма = 1). API и графика доминируют
-    # в интерактивной работе SketchUp, файлы — самый шумный компонент.
+    # Опубликованные веса категорий (сумма = 1). Моделирование и инструменты
+    # доминируют в интерактивной работе, файл ~500 МБ — самый весомый
+    # «больной» сценарий, анимация и вьюпорт — рендер-нагрузка.
     WEIGHTS = {
-      'ruby' => 0.20,
-      'api' => 0.40,
-      'documents' => 0.10,
-      'graphics' => 0.30
+      'modeling' => 0.20,
+      'tools' => 0.20,
+      'viewport' => 0.20,
+      'animation' => 0.15,
+      'storage' => 0.25
     }.freeze
 
-    # Тесты, входящие в балл (канонический набор; scene_gen_* и легаси-
-    # дубли не участвуют, чтобы не учитывать одну работу дважды). API-04
-    # исключён: субмиллисекундный тест (медиана 0.0–0.1 мс) даёт нестабильное
-    # отношение к базе и делает балл «partial» на быстрых машинах.
-    # fps_components_static удалён из набора (suite v3): сцена компонентов
-    # вешала вьюпорт SU2027 (см. CHANGELOG 0.4.0).
+    # Тесты, входящие в балл (канонический набор suite v4). Справочные
+    # времена сборки (model_build входит как операция моделирования;
+    # storage_build и wave_build — нет: это setup, а не измеряемая операция).
     INCLUDED = {
-      'ruby' => %w[RUBY-01],
-      'api' => %w[API-01 API-02 API-03 API-05 API-06],
-      'documents' => %w[DOC-01 DOC-02],
-      'graphics' => %w[fps_grid_static fps_grid_orbit
-                       fps_grid_pan fps_grid_zoom fps_textured_static]
+      'modeling' => %w[model_build model_edit_definition model_traverse model_explode],
+      'tools' => %w[tool_draw tool_pushpull tool_move tool_rotate tool_scale
+                    tool_followme tool_intersect tool_paint tool_zoom_extents],
+      'viewport' => %w[fps_components_static fps_components_orbit
+                       fps_poly_static fps_poly_orbit],
+      'animation' => %w[fps_wave_orbit wave_update_ms],
+      'storage' => %w[storage_save storage_open]
     }.freeze
 
     class << self
@@ -134,7 +135,7 @@ module Dn1supBenchmark
       end
 
       def load_baseline(profile)
-        path = File.join(Dn1supBenchmark::PLUG_ROOT, "baseline-#{profile}-v1.json")
+        path = File.join(Dn1supBenchmark::PLUG_ROOT, "baseline-#{profile}-v4.json")
         return nil unless File.exist?(path)
 
         JSON.parse(File.read(path))

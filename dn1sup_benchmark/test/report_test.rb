@@ -27,7 +27,7 @@ module Dn1supBenchmark::Test
       'meta' => {
         'schema_version' => 1,
         'benchmark_version' => Dn1supBenchmark::VERSION,
-        'test_suite_version' => '2',
+        'test_suite_version' => '4',
         'extension_version' => Dn1supBenchmark::VERSION,
         'profile' => profile,
         'sketchup_version' => su_version, 'version_number' => 24_0_000,
@@ -42,8 +42,8 @@ module Dn1supBenchmark::Test
       },
       'run' => { 'profile' => profile, 'status' => 'completed', 'started_at' => '2026-10-28 10:00:00' },
       'results' => [
-        fixture_result('fps_grid_static', 'graphics', 'fps', fps),
-        fixture_result('pushpull_batch', 'api', 'ms', ms)
+        fixture_result('fps_components_orbit', 'viewport', 'fps', fps),
+        fixture_result('tool_pushpull', 'tools', 'ms', ms)
       ],
       'log' => []
     }
@@ -51,14 +51,14 @@ module Dn1supBenchmark::Test
 
   test 'html_single: самодостаточный HTML с категориями и статусами' do
     data = fixture_run('27.0.999', 60.0, 120.0)
-    data['results'] << fixture_result('DOC-X', 'documents', 'ms', 5.0).merge(
+    data['results'] << fixture_result('STORAGE-X', 'storage', 'ms', 5.0).merge(
       'status' => 'skipped', 'value' => nil, 'error' => 'отключено',
       'validation' => { 'passed' => false, 'errors' => ['отключено'] }
     )
     html = Dn1supBenchmark::Report.html_single(data)
     assert(html.include?('<html'), 'нет <html>')
     assert(html.include?('FPS'), 'нет строк FPS')
-    assert(html.include?('Чистый Ruby') || html.include?('SketchUp API'), 'нет категорий')
+    assert(html.include?('Моделирование') || html.include?('Инструменты'), 'нет категорий')
     assert(html.include?('пропущено'), 'нет статуса skipped')
     refute(html.include?('http://cdn') || html.include?('https://'), 'отчёт не должен тянуть CDN')
   end
@@ -90,13 +90,13 @@ module Dn1supBenchmark::Test
 
   test 'incompatibility_reason: все ветки' do
     rep = Dn1supBenchmark::Report
-    x = fixture_result('T', 'api', 'ms', 1.0, params: { 'a' => 1, 'nested' => { 'b' => 2 } })
-    assert_nil(rep.incompatibility_reason(x, fixture_result('T', 'api', 'ms', 2.0,
+    x = fixture_result('T', 'modeling', 'ms', 1.0, params: { 'a' => 1, 'nested' => { 'b' => 2 } })
+    assert_nil(rep.incompatibility_reason(x, fixture_result('T', 'modeling', 'ms', 2.0,
                                                             params: { 'nested' => { 'b' => 2 }, 'a' => 1 })))
-    assert(rep.incompatibility_reason(x, fixture_result('T', 'api', 'ms', 2.0, version: '2')))
-    assert(rep.incompatibility_reason(x, fixture_result('T', 'api', 'fps', 2.0)))
-    assert(rep.incompatibility_reason(x, fixture_result('T', 'api', 'ms', 2.0, params: { 'a' => 2 })))
-    old = fixture_result('T', 'api', 'ms', 1.0).merge('test_version' => nil)
+    assert(rep.incompatibility_reason(x, fixture_result('T', 'modeling', 'ms', 2.0, version: '2')))
+    assert(rep.incompatibility_reason(x, fixture_result('T', 'modeling', 'fps', 2.0)))
+    assert(rep.incompatibility_reason(x, fixture_result('T', 'modeling', 'ms', 2.0, params: { 'a' => 2 })))
+    old = fixture_result('T', 'modeling', 'ms', 1.0).merge('test_version' => nil)
     assert(rep.incompatibility_reason(x, old).to_s.include?('версии теста'))
   end
 

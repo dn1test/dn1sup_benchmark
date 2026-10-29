@@ -56,7 +56,7 @@ module Dn1supBenchmark
         @last_label = step['label'] || step['name']
         emit('step', 'label' => @last_label, 'index' => @done + 1, 'total' => @total)
         case step['kind']
-        when 'fps'
+        when 'fps', 'wave'
           Runner.perform(step)
           poll_fps(step, steps)
         when 'finish'
@@ -99,13 +99,14 @@ module Dn1supBenchmark
         emit('error', 'class' => e.class.name, 'message' => e.message)
       end
 
-      # FPS-шаг асинхронный: инструмент работает в UI-потоке, опрашиваем
-      # повторяющимся таймером до готовности (или таймаут 30 с, или отмена).
+      # FPS/wave-шаги асинхронные: инструмент работает в UI-потоке, опрашиваем
+      # повторяющимся таймером до готовности (таймаут от Runner, или отмена).
       def poll_fps(step, steps)
         waited = 0.0
+        limit = Runner.async_step_limit
         timer = UI.start_timer(0.4, true) do
           waited += 0.4
-          if Runner.fps_ready? || waited > 30.0 || Runner.cancelled?
+          if Runner.fps_ready? || waited > limit || Runner.cancelled?
             UI.stop_timer(timer)
             Dn1supBenchmark.timers.delete(timer)
             Runner.fps_collect

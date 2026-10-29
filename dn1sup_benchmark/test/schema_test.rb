@@ -73,7 +73,7 @@ module Dn1supBenchmark::Test
       'meta' => {
         'schema_version' => 1,
         'benchmark_version' => Dn1supBenchmark::VERSION,
-        'test_suite_version' => '2',
+        'test_suite_version' => '4',
         'extension_version' => Dn1supBenchmark::VERSION,
         'profile' => 'small',
         'params' => { 'iters' => 3 },
@@ -89,7 +89,7 @@ module Dn1supBenchmark::Test
       },
       'run' => { 'profile' => 'small', 'status' => 'completed', 'started_at' => 'x' },
       'results' => [
-        { 'id' => 'RUBY-01', 'name' => 'Чистый Ruby', 'group' => 'ruby', 'category' => 'ruby',
+        { 'id' => 'model_build', 'name' => 'Сборка сложной модели', 'group' => 'modeling', 'category' => 'modeling',
           'test_version' => '1', 'unit' => 'ms', 'higher_is_better' => false,
           'status' => 'passed', 'parameters' => {}, 'repeat_count' => 3,
           'times_ms' => [10.0, 11.0, 12.0], 'median_ms' => 11.0, 'min_ms' => 10.0,
@@ -97,14 +97,14 @@ module Dn1supBenchmark::Test
           'entities_created' => nil, 'file_size_bytes' => nil,
           'validation' => { 'passed' => true, 'errors' => [] },
           'error' => nil, 'diagnostics' => [], 'value' => 11.0 },
-        { 'id' => 'fps_grid_static', 'name' => 'FPS', 'group' => 'graphics', 'category' => 'graphics',
+        { 'id' => 'fps_components_orbit', 'name' => 'FPS', 'group' => 'viewport', 'category' => 'viewport',
           'test_version' => '1', 'unit' => 'fps', 'higher_is_better' => true,
           'status' => 'skipped', 'parameters' => {}, 'repeat_count' => 0,
           'times_ms' => [], 'median_ms' => nil, 'min_ms' => nil, 'max_ms' => nil,
           'p95_ms' => nil, 'ops_per_sec' => nil, 'entities' => nil,
           'entities_created' => nil, 'file_size_bytes' => nil,
-          'validation' => { 'passed' => false, 'errors' => ['нет страниц'] },
-          'error' => 'нет страниц', 'diagnostics' => [], 'value' => nil }
+          'validation' => { 'passed' => false, 'errors' => ['нет кадров'] },
+          'error' => 'нет кадров', 'diagnostics' => [], 'value' => nil }
       ],
       'log' => []
     }
@@ -130,8 +130,9 @@ module Dn1supBenchmark::Test
 
   test 'реальный последний отчёт соответствует схеме (если есть)' do
     skip('вне SketchUp: отчётов ещё нет') unless defined?(Sketchup)
-    runs = Dn1supBenchmark::Report.list_runs(1)
-    skip('прогонов ещё не было') if runs.empty?
+    runs = Dn1supBenchmark::Report.list_runs(5)
+    runs = runs.select { |r| r['suite'] == Dn1supBenchmark::Runner::SUITE_VERSION }
+    skip('прогонов текущего набора ещё не было') if runs.empty?
     schema = load_schema
     data = JSON.parse(File.read(runs.first['path']))
     errors = []
