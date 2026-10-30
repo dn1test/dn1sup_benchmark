@@ -57,75 +57,7 @@ module Dn1supBenchmark
         { 'html' => out_path, 'runs' => datas.size }
       end
 
-      # Данные сравнения для UI (те же правила совместимости, что и в HTML).
-      def compare_data(datas)
-        raise 'нужно минимум 2 прогона' if datas.size < 2
-
-        warnings = []
-        scores = datas.map { |d| d['score'] || Score.compute(d) }
-        score_cells = scores.each_with_index.map do |s, i|
-          next { 'overall' => nil, 'reason' => s.nil? ? 'нет балла' : s['reason'] } if s.nil? || s['overall'].nil?
-
-          cell = { 'overall' => s['overall'], 'status' => s['status'], 'missing' => s['missing'] }
-          if i.positive?
-            reason = score_compatibility(scores.first, s)
-            base_s = scores.first['overall']
-            if reason
-              cell['incompatible'] = reason
-            elsif base_s && base_s.positive?
-              cell['percent'] = ((s['overall'] / base_s - 1) * 100).round(1)
-            end
-          end
-          cell
-        end
-        cols = datas.map do |d|
-          { 'sketchup' => d.dig('meta', 'sketchup_version'),
-            'profile' => d.dig('meta', 'profile'),
-            'suite' => d.dig('meta', 'test_suite_version') }
-        end
-        ids = []
-        datas.each do |d|
-          (d['results'] || []).each { |r| ids << r['id'] unless ids.include?(r['id']) }
-        end
-        by_run_test = datas.map do |d|
-          h = {}
-          (d['results'] || []).each { |r| h[r['id']] = r }
-          h
-        end
-
-        rows = ids.map do |tid|
-          base_r = by_run_test.first[tid]
-          name = base_r ? (base_r['name'] || tid) : tid
-          cells = datas.each_with_index.map do |_d, i|
-            r = by_run_test[i][tid]
-            next { 'value' => nil } if r.nil? || r['value'].nil?
-
-            cell = { 'value' => r['value'], 'status' => r['status'] }
-            next cell if i.zero?
-
-            reason = base_r.nil? ? 'нет в базовом прогоне' : incompatibility_reason(base_r, r)
-            basev = base_r && base_r['value']
-            if reason
-              cell['incompatible'] = reason
-              warnings << "#{name}: #{cols[i]['sketchup']} #{cols[i]['profile']} — #{reason}"
-            elsif basev && basev.positive?
-              rel = (r['value'] / basev - 1) * 100
-              cell['percent'] = rel.round(1)
-            end
-            cell
-          end
-          { 'id' => tid, 'name' => name,
-            'group' => base_r ? base_r['group'] : 'api',
-            'unit' => base_r ? base_r['unit'] : nil,
-            'higher' => base_r ? base_r['higher_is_better'] : false,
-            'cells' => cells }
-        end
-
-        { 'columns' => cols, 'rows' => rows, 'warnings' => warnings.uniq,
-          'base_index' => 0, 'scores' => score_cells }
-      end
-
-      # Список сохранённых прогонов (новые сверху) — для вкладки «Сравнение».
+      # Список сохранённых прогонов (новые сверху) — для программного API.
       def list_runs(limit = 30)
         # Backslash в glob-паттерне — экранирование: приводим к «/».
         pattern = File.join(report_dir, 'bench-*.json').tr('\\', '/')

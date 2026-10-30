@@ -7,7 +7,6 @@ import SystemPanel from './components/SystemPanel.vue'
 import RunPanel from './components/RunPanel.vue'
 import TestsPanel from './components/TestsPanel.vue'
 import ResultsPanel from './components/ResultsPanel.vue'
-import ComparePanel from './components/ComparePanel.vue'
 
 const { isDark, toggleTheme } = useTheme()
 
@@ -62,9 +61,6 @@ const noticeCls = computed(() => ({
         <hr class="my-3 border-slate-200 dark:border-slate-800">
         <h2 class="ss-label mb-2">Результаты</h2>
         <ResultsPanel />
-        <hr class="my-3 border-slate-200 dark:border-slate-800">
-        <h2 class="ss-label mb-2">Сравнение</h2>
-        <ComparePanel />
       </div>
     </div>
   </div>

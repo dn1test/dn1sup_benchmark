@@ -129,18 +129,6 @@ module Dn1supBenchmark
           push(dlg, 'results', data ? run_results_data(data) : { 'none' => true })
         end
 
-        dlg.add_action_callback('get_runs') do |_ctx|
-          push(dlg, 'runs', { 'items' => Report.list_runs(30) })
-        end
-
-        dlg.add_action_callback('compare_runs') do |_ctx, paths_json|
-          paths = parse_json(paths_json) || []
-          datas = paths.map { |p| JSON.parse(File.read(p)) }
-          push(dlg, 'compare', Report.compare_data(datas))
-        rescue StandardError => e
-          push(dlg, 'error', { 'message' => "Сравнение: #{e.class}: #{e.message}" })
-        end
-
         dlg.add_action_callback('open_path') do |_ctx, path, report_kind|
           if report_kind == 'dir'
             UI.openURL("file:///#{path.to_s.tr('\\', '/')}")

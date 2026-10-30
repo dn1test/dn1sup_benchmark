@@ -15,7 +15,7 @@ const mockOverview = {
     platform: 'x64-mingw-ucrt',
     cpu: 'AMD Ryzen 9 7950X',
     cores: '32',
-    benchmark_version: '0.7.0',
+    benchmark_version: '0.7.1',
     test_suite_version: '5',
     schema_version: '1',
     environment: {
@@ -119,34 +119,6 @@ const mockResults = {
   ]
 }
 
-const mockRuns = [
-  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-30_120000.json', sketchup: '27.0.123', profile: 'suite', started_at: '2026-10-30 12:00', suite: '5', tests: 12 },
-  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-29_181500.json', sketchup: '27.0.123', profile: 'suite', started_at: '2026-10-29 18:15', suite: '5', tests: 12 },
-  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-20_093000.json', sketchup: '26.0.456', profile: 'suite', started_at: '2026-10-20 09:30', suite: '5', tests: 12 },
-  { path: 'C:\\Users\\dn1desn\\Documents\\SketchUp Benchmarks\\bench-2026-10-12_110000.json', sketchup: '26.0.456', profile: 'small', started_at: '2026-10-12 11:00', suite: '4', tests: 10 }
-]
-
-const mockCompare = {
-  warnings: ['Прогон 2026-10-12: другая версия набора (v3) — проценты не считаются'],
-  columns: [
-    { sketchup: '26.0.456', profile: 'small' },
-    { sketchup: '27.0.123', profile: 'small' }
-  ],
-  scores: [
-    { overall: 1000 },
-    { overall: 1023.4, percent: 2.3 },
-    null
-  ],
-  rows: [
-    { group: 'modeling', name: 'Инстанцирование сборок', unit: 'ms', higher: false,
-      cells: [{ value: 840 }, { value: 812, percent: -3.3 }, { incompatible: 'другая версия набора' }] },
-    { group: 'viewport', name: 'Вращение вьюпорта', unit: 'fps', higher: true,
-      cells: [{ value: 56.4 }, { value: 58.2, percent: 3.2 }, { value: null }] },
-    { group: 'viewport', name: 'Отрисовка цилиндров', unit: 'ms', higher: false,
-      cells: [{ value: 209 }, { value: 214, percent: 2.4 }, { value: null }] }
-  ]
-}
-
 // Симуляция прогона: start → шаги с chunk/fps_tick → finish.
 function runMockSequence() {
   const total = 6
@@ -195,8 +167,6 @@ export function installMock() {
     get_overview() { later(() => receive('overview', mockOverview)) },
     get_plan() { later(() => receive('plan', mockPlan()), 250) },
     get_results() { later(() => receive('results', mockResults)) },
-    get_runs() { later(() => receive('runs', { items: mockRuns })) },
-    compare_runs() { later(() => receive('compare', mockCompare), 300) },
     start_run() { runMockSequence() },
     cancel_run() { later(() => receive('notice', { message: 'Отмена запрошена — остановится после текущего теста (mock)' })) },
     open_path() { later(() => receive('notice', { message: 'open_path: папка отчётов (mock)' })) },

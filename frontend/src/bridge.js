@@ -1,9 +1,9 @@
 /* dn1sup_benchmark — мост Ruby ↔ JS (Vue-порт ui/html/app.js).
- * Контракт тот же, что и раньше (dialog.rb не менялся до 0.7.0):
- *  — JS → Ruby: sketchup.<callback>(...), часть аргументов — JSON-строки;
- *  — Ruby → JS: window.bench.receive(channel, payload), 10 каналов.
- * С 0.7.0 набор один (без профилей и настроек): get_plan/start_run без
- * аргументов, каналы settings нет.
+ * Контракт: JS → Ruby: sketchup.<callback>(...); Ruby → JS:
+ * window.bench.receive(channel, payload). С 0.7.1 набор один (без профилей
+ * и настроек), блок сравнения прогонов убран: get_plan/start_run без
+ * аргументов, каналы settings/runs/compare и колбэки get_runs/compare_runs
+ * больше нет.
  * Вне SketchUp (npm run dev в браузере) работает mock-режим (src/mocks.js). */
 
 import { reactive } from 'vue'
@@ -29,10 +29,7 @@ export const state = reactive({
   runCurrent: '—',
   runLog: [], // {kind: 'info'|'ok'|'err'|'done', text}
 
-  results: null,    // {none:true} | {meta, run, score, groups}
-  runs: [],         // [{path, sketchup, profile, started_at, suite, tests}]
-  runsSelection: [], // выбранные для сравнения пути (v-model чекбоксов)
-  compare: null,    // {warnings, columns, scores, rows}
+  results: null, // {none:true} | {meta, run, score, groups}
 
   notice: null // {kind: 'info'|'ok'|'err', text}
 })
@@ -109,13 +106,6 @@ export function receive(channel, payload) {
     case 'results':
       state.results = payload
       break
-    case 'runs':
-      state.runs = (payload && payload.items) || []
-      state.runsSelection = []
-      break
-    case 'compare':
-      state.compare = payload
-      break
     case 'notice':
       showNotice(payload.message)
       break
@@ -153,20 +143,9 @@ export function refreshPlan() { call('get_plan') }
 
 export function refreshResults() { call('get_results') }
 
-export function refreshRuns() { call('get_runs') }
-
 export function startRun() { call('start_run') }
 
 export function cancelRun() { call('cancel_run') }
-
-export function compareSelected() {
-  const paths = state.runsSelection
-  if (paths.length < 2) {
-    showNotice('Выберите минимум два прогона', 'err')
-    return
-  }
-  call('compare_runs', JSON.stringify(paths))
-}
 
 export function openReports() {
   call('open_path', (state.overview && state.overview.reports_dir) || '', 'dir')
@@ -174,11 +153,9 @@ export function openReports() {
 
 export function openLastReport() { call('open_last_report_path') }
 
-/* Стартовая загрузка (порт DOMContentLoaded-бутстрапа app.js): обзор, план
- * набора и данные правой страницы — результаты и список прогонов. */
+/* Стартовая загрузка: обзор, план набора и результаты последнего прогона. */
 export function bootstrap() {
   refreshOverview()
   refreshPlan()
   refreshResults()
-  refreshRuns()
 }
