@@ -73,7 +73,7 @@ module Dn1supBenchmark::Test
       'meta' => {
         'schema_version' => 1,
         'benchmark_version' => Dn1supBenchmark::VERSION,
-        'test_suite_version' => '5',
+        'test_suite_version' => '6',
         'extension_version' => Dn1supBenchmark::VERSION,
         'profile' => 'suite',
         'params' => { 'iters' => 3 },

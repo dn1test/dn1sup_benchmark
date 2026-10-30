@@ -1,6 +1,6 @@
 {
   "name": "dn1sup-benchmark-frontend",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "private": true,
   "type": "module",
   "description": "UI панели бенчмарка расширения SketchUp dn1sup_benchmark (Vue 3 + Tailwind CSS)",

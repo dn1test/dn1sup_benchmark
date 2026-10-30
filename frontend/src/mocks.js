@@ -15,8 +15,8 @@ const mockOverview = {
     platform: 'x64-mingw-ucrt',
     cpu: 'AMD Ryzen 9 7950X',
     cores: '32',
-    benchmark_version: '0.7.1',
-    test_suite_version: '5',
+    benchmark_version: '0.8.0',
+    test_suite_version: '6',
     schema_version: '1',
     environment: {
       ui_scale_factor: 1.0,
@@ -50,17 +50,18 @@ const mockOverview = {
 
 const mockPlanBase = {
   profile: 'suite',
-  warning: 'Полный прогон занимает ~1 минуту. Тест файла ~130 МБ: генерация текстур и сохранение занимают большую часть минуты прогона, нужно ~0,5 ГБ свободного места; во время сохранения/открытия UI кратко блокируется.',
+  warning: 'Полный прогон занимает ~1–2,5 минуты (первый на машине — дольше: генерация текстур). Тест файла ~500 МБ: генерация текстур (при холодном кэше) и сохранение занимают большую часть прогона, нужно ~1,5 ГБ свободного места; во время сохранения/открытия UI кратко блокируется.',
   params: {
-    targets: { instances: 1024, file_mb: 130 },
+    targets: { instances: 1024, file_mb: 500 },
     diverse: { grid: 16, leaves: 4 },
     poly: { n: 40, segments: 36 },
     wave: { grid: 36 },
     storage: { boxes: 1200, tex_size: 4096, max_tex: 24 },
     wave_s: 8.0,
-    target_mb: 130,
+    target_mb: 500,
     iters: 3,
-    fps_s: 2.0
+    fps_s: 2.0,
+    resolution: 'hd'
   },
   steps: [
     { label: 'Сборка: сетка сборок', kind: 'build', category: 'modeling' },
@@ -120,7 +121,7 @@ const mockResults = {
 }
 
 // Симуляция прогона: start → шаги с chunk/fps_tick → finish.
-function runMockSequence() {
+function runMockSequence(_resolution) {
   const total = 6
   const steps = [
     'Сборка: сетка сборок',
@@ -165,9 +166,12 @@ function runMockSequence() {
 export function installMock() {
   window.sketchup = {
     get_overview() { later(() => receive('overview', mockOverview)) },
-    get_plan() { later(() => receive('plan', mockPlan()), 250) },
+    get_plan(resolution) {
+      const plan = { ...mockPlan(), params: { ...mockPlan().params, resolution } }
+      later(() => receive('plan', plan), 250)
+    },
     get_results() { later(() => receive('results', mockResults)) },
-    start_run() { runMockSequence() },
+    start_run(resolution) { runMockSequence(resolution) },
     cancel_run() { later(() => receive('notice', { message: 'Отмена запрошена — остановится после текущего теста (mock)' })) },
     open_path() { later(() => receive('notice', { message: 'open_path: папка отчётов (mock)' })) },
     open_last_report_path() { later(() => receive('notice', { message: 'open_last_report_path (mock)' })) }

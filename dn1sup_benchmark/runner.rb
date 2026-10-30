@@ -15,7 +15,7 @@
 #   4. animation — волна из кубиков 100×100×100 мм: бегущая диагональная
 #                  волна пакетами Entities#transform_entities + полный
 #                  оборот камеры (WaveTool);
-#   5. storage   — файл ~130 МБ: кусковая сборка (уникальная геометрия +
+#   5. storage   — файл ~500 МБ: кусковая сборка (уникальная геометрия +
 #                  шумовые PNG-текстуры), калибровка размера, сохранение ×2
 #                  и открытие с МБ/с.
 #
@@ -52,16 +52,16 @@ module Dn1supBenchmark
   module Runner
     # Версия НАБОРА тестов: меняется при изменении состава/методики
     # (сравнение прогонов с разными suite-версиями помечается несовместимым).
+    # 6 — цель файла возвращена к 500 МБ (v5 с 130 МБ существовала один день):
+    #     прогон ~1–2,5 минуты (первый на машине дольше — генерация текстур).
     # 5 — набор ОДИН, без профилей и переопределений: параметры small с целью
-    #     файла 130 МБ вместо 500 — полный прогон укладывается ~в минуту
-    #     (500 МБ давали ~2 мин только на генерацию текстур). Прогоны v4
-    #     несравнимы с v5 (сравнение пометит по test_suite_version).
+    #     файла 130 МБ вместо 500.
     # 4 — полная смена набора под ТЗ от 2026-10-28: удалены RUBY/API-xx/
     #     сцены nested/grid/textured/DOC (малый файл)/fps_grid_*; новые
     #     категории modeling/tools/viewport/animation/storage (волна,
     #     файл ~500 МБ). Лимит компонентных сцен ≤10 тыс. инстансов —
     #     урок зависания SU2027 на 80 тыс. (suite v3).
-    SUITE_VERSION = '5'
+    SUITE_VERSION = '6'
     # Версия конкретного теста: менять при изменении его измеряемой операции.
     TEST_VERSION = '1'
 
@@ -88,38 +88,53 @@ module Dn1supBenchmark
       end
     end
 
+    # Разрешения вьюпорта для FPS-замеров (один из трёх; перед каждым замером
+    # окно переформировывается Sketchup.resize_viewport, после прогона —
+    # возвращается исходный размер). Значение пишется в параметры каждого
+    # FPS-теста; балл нормирован на разрешение по умолчанию (см. score.rb).
+    RESOLUTIONS = {
+      'hd'  => [1280, 720],
+      'fhd' => [1920, 1080],
+      'qhd' => [2560, 1440]
+    }.freeze
+    DEFAULT_RESOLUTION = 'hd'
+
     # Единый набор нагрузки (профилей нет): параметры пяти категорий,
-    # полный прогон ~1 минута. Параметры сцен записываются в отчёт
+    # полный прогон ~1–2,5 минуты. Параметры сцен записываются в отчёт
     # (meta.params + параметры каждого теста).
     #   diverse: grid² сборок × leaves листьев = всего инстансов
     #            (лимит ≤10 000 — зависание SU2027 на 80 000);
     #   poly:    n² цилиндров по segments сегментов ≈ n²×(2s+2) треугольников;
     #   wave:    grid² кубов 100×100×100 мм, волна wave_s секунд;
     #   tools:   масштабы фикстур тестов инструментов;
-    #   storage: уникальных тел + шумовые текстуры 4096² до цели target_mb
-    #            (130 МБ: 3 текстуры по ~48 МБ; при 500 МБ генерация текстур
-    #            одна занимала ~2 минуты).
+    #   storage: уникальных тел + шумовые PNG-текстуры 4096² до цели
+    #            target_mb (500 МБ ≈ 11 текстур по ~48 МБ; текстуры кэшируются
+    #            во временной папке — первый прогон на машине дольше);
+    #   resolution: разрешение вьюпорта FPS-замеров (см. RESOLUTIONS).
     SUITE = {
-      'targets' => { 'instances' => 1_024, 'triangles' => 173_000, 'file_mb' => 130 },
+      'targets' => { 'instances' => 1_024, 'triangles' => 173_000, 'file_mb' => 500 },
       'diverse' => { 'grid' => 16, 'leaves' => 4, 'leaf_defs' => 24, 'asm_defs' => 6 },
       'poly' => { 'n' => 40, 'segments' => 36 },
       'wave' => { 'grid' => 36 },
       'tools' => { 'draw' => 240, 'pushpull' => 24, 'inst' => 240,
                    'followme' => 8, 'intersect' => 16, 'paint' => 240 },
       'storage' => { 'boxes' => 1_200, 'tex_size' => 4_096, 'max_tex' => 24 },
-      'target_mb' => 130,
-      'fps_s' => 2.0, 'iters' => 3, 'wave_s' => 8.0
+      'target_mb' => 500,
+      'fps_s' => 2.0, 'iters' => 3, 'wave_s' => 8.0,
+      'resolution' => DEFAULT_RESOLUTION
     }.freeze
 
     # Имя «профиля» в отчётах (один набор — одно имя; сравнение прогонов
     # и имя baseline-файла завязаны на него).
     SUITE_PROFILE = 'suite'
 
-    SUITE_NOTE = 'тест файла ~130 МБ: генерация текстур и сохранение занимают ' \
-                 'большую часть минуты прогона, нужно ~0,5 ГБ свободного места; ' \
-                 'во время сохранения/открытия UI кратко блокируется'.freeze
+    SUITE_NOTE = 'тест файла ~500 МБ: генерация текстур (при холодном кэше) ' \
+                 'и сохранение занимают большую часть прогона, нужно ~1,5 ГБ ' \
+                 'свободного места; во время сохранения/открытия UI кратко ' \
+                 'блокируется'.freeze
 
-    SUITE_WARNING = "Полный прогон занимает ~1 минуту. #{SUITE_NOTE}.".freeze
+    SUITE_WARNING = "Полный прогон занимает ~1–2,5 минуты (первый на машине — дольше: " \
+                    "генерация текстур). #{SUITE_NOTE}.".freeze
 
     class << self
       attr_reader :tool
@@ -140,6 +155,68 @@ module Dn1supBenchmark
 
       def suite_params
         deep_copy(SUITE).merge('profile' => SUITE_PROFILE)
+      end
+
+      # Выбранное разрешение вьюпорта: нормализация (неизвестное → hd).
+      def normalize_resolution(res)
+        RESOLUTIONS.key?(res.to_s) ? res.to_s : DEFAULT_RESOLUTION
+      end
+
+      # Запрос разрешения от панели/меню до begin_run (валидация сразу,
+      # применение — в begin_run).
+      def resolution_request=(res)
+        @resolution_request = normalize_resolution(res)
+      end
+
+      def resolution_request
+        @resolution_request
+      end
+
+      # -- вьюпорт FPS-замеров --------------------------------------------------------
+
+      # Переформировать окно под выбранное разрешение; возвращает фактический
+      # размер 'WxH' (resize_viewport может отказать у маленького монитора —
+      # замер тогда идёт в фактическом размере, он и записывается в отчёт).
+      def viewport_apply(res)
+        w, h = RESOLUTIONS.fetch(normalize_resolution(res))
+        model = Sketchup.active_model
+        view = model.active_view
+        if defined?(Sketchup.resize_viewport)
+          begin
+            Sketchup.resize_viewport(model, w, h)
+          rescue StandardError => e
+            log_line("вид: resize_viewport не удался: #{e.class}: #{e.message}")
+          end
+        end
+        actual = "#{view.vpwidth.to_i}x#{view.vpheight.to_i}"
+        log_line("вид: запрос #{w}x#{h} → факт #{actual}")
+        actual
+      end
+
+      # Исходный размер вьюпорта (для восстановления после прогона).
+      def viewport_capture
+        view = Sketchup.active_model.active_view
+        @orig_viewport = "#{view.vpwidth.to_i}x#{view.vpheight.to_i}"
+      end
+
+      def viewport_restore
+        return if @orig_viewport.nil?
+        return if defined?(Sketchup.resize_viewport).nil?
+
+        model = Sketchup.active_model
+        return if model.nil?
+
+        view = model.active_view
+        now = "#{view.vpwidth.to_i}x#{view.vpheight.to_i}"
+        return if now == @orig_viewport
+
+        w, h = @orig_viewport.split('x').map(&:to_i)
+        begin
+          Sketchup.resize_viewport(model, w, h)
+          log_line("вид: возвращён исходный #{@orig_viewport}")
+        rescue StandardError => e
+          log_line("вид: возврат размера не удался: #{e.class}: #{e.message}")
+        end
       end
 
       # -- план прогона --------------------------------------------------------------
@@ -171,18 +248,22 @@ module Dn1supBenchmark
           { 'kind' => 'wave', 'id' => 'wave_animation', 'category' => 'animation',
             'name' => 'Волна: анимация + полный оборот камеры (FPS)' },
           { 'kind' => 'scene', 'scene' => 'storage', 'category' => 'storage',
-            'label' => 'Файл: сборка модели ~130 МБ (геометрия + текстуры), сохранение ×2' },
-          { 'kind' => 'storage_open', 'category' => 'storage', 'label' => 'Файл: открытие ~130 МБ' },
+            'label' => 'Файл: сборка модели ~500 МБ (геометрия + текстуры), сохранение ×2' },
+          { 'kind' => 'storage_open', 'category' => 'storage', 'label' => 'Файл: открытие ~500 МБ' },
           { 'kind' => 'finish', 'label' => 'Отчёт' }
         ]
       end
 
-      # Краткое описание плана для UI (без исполнения).
-      def plan_preview
+      # Краткое описание плана для UI (без исполнения). resolution — выбор
+      # разрешения вьюпорта из панели (план показывает выбранное).
+      def plan_preview(resolution = nil)
+        params = suite_params
+        params['resolution'] = normalize_resolution(resolution || @resolution_request)
         {
           'profile' => SUITE_PROFILE,
-          'params' => suite_params,
+          'params' => params,
           'warning' => SUITE_WARNING,
+          'resolutions' => RESOLUTIONS.transform_values { |w, h| "#{w}x#{h}" },
           'steps' => steps.map do |s|
             { 'kind' => s['kind'], 'label' => s['label'] || s['name'], 'category' => s['category'] }
           end
@@ -210,6 +291,7 @@ module Dn1supBenchmark
 
       def begin_run
         params = suite_params
+        params['resolution'] = normalize_resolution(@resolution_request)
         model = Sketchup.active_model
         raise 'нет активной модели' if model.nil?
 
@@ -217,6 +299,7 @@ module Dn1supBenchmark
         @cancel_requested = false
         @run_model = model
         @baseline_entities = model.entities.size
+        viewport_capture
         @state = {
           'profile' => SUITE_PROFILE,
           'params' => params,
@@ -226,7 +309,9 @@ module Dn1supBenchmark
           'scene_info' => nil,
           'log' => []
         }
-        log_line("прогон начат (набор v#{SUITE_VERSION}, ~1 минута)")
+        res = RESOLUTIONS.fetch(params['resolution'])
+        log_line("прогон начат (набор v#{SUITE_VERSION}, файл ~#{params['target_mb']} МБ, " \
+                 "вид #{res[0]}x#{res[1]}, ~1–2,5 минуты)")
         begin
           File.delete(File.join(PngGen.temp_root, 'run_heartbeat.log'))
         rescue StandardError
@@ -252,6 +337,8 @@ module Dn1supBenchmark
         @scene_state = nil
         @run_model = nil
         @baseline_entities = nil
+        @orig_viewport = nil
+        @resolution_request = nil
         @cancel_requested = false
         nil
       end
@@ -792,6 +879,7 @@ module Dn1supBenchmark
         return 'FPS только на открытой сцене' if @state['scene'].nil?
 
         fps_stop_tool # страховка от забытого инструмента
+        @state['viewport_actual'] = viewport_apply(@state['params']['resolution'])
         view = Sketchup.active_model.active_view
         view.zoom_extents
         @tool = FpsTool.new(@state['params']['fps_s'], step['mode'])
@@ -841,7 +929,7 @@ module Dn1supBenchmark
         add_result('viewport', step['id'], step['name'], 'fps',
                    [result['fps']], higher: true,
                    entities: fps_scene_entities,
-                   params: fps_scene_params.merge(
+                   params: fps_viewport_params.merge(
                      'duration_s' => result['elapsed_s'],
                      'source' => 'счётчик кадров Tool#draw + view.invalidate (Ruby-сторона, не GPU-счётчик)',
                      'window' => 'окно SketchUp должно быть видимым: свёрнутое/перекрытое окно не отрисовывает кадры'
@@ -875,6 +963,15 @@ module Dn1supBenchmark
         else
           { 'scene' => @state['scene'].to_s }
         end
+      end
+
+      # Параметры, общие для всех FPS-замеров: выбранное разрешение и
+      # фактический размер вьюпорта на момент замера.
+      def fps_viewport_params
+        fps_scene_params.merge(
+          'resolution' => @state['params']['resolution'],
+          'viewport_px' => @state['viewport_actual']
+        )
       end
 
       def fps_stop_tool
@@ -934,6 +1031,7 @@ module Dn1supBenchmark
         return 'полотно волны не построено' if (info['instances'] || []).empty?
 
         fps_stop_tool
+        @state['viewport_actual'] = viewport_apply(@state['params']['resolution'])
         view = Sketchup.active_model.active_view
         view.zoom_extents
         wave_s = @state['params']['wave_s']
@@ -950,6 +1048,8 @@ module Dn1supBenchmark
         add_result('animation', 'fps_wave_orbit', 'Волна + вращение камеры: FPS', 'fps',
                    [result['fps']], higher: true, entities: cubes,
                    params: { 'grid' => grid, 'cubes' => cubes, 'cube_mm' => 100,
+                             'resolution' => @state['params']['resolution'],
+                             'viewport_px' => @state['viewport_actual'],
                              'amplitude_mm' => WaveTool::AMPLITUDE_MM,
                              'wavelength_cells' => WaveTool::WAVELENGTH_CELLS,
                              'period_s' => WaveTool::PERIOD_S,
@@ -973,7 +1073,7 @@ module Dn1supBenchmark
       end
 
       # ==========================================================================
-      # 5. STORAGE — файл ~130 МБ: сборка, калибровка, сохранение ×2, открытие
+      # 5. STORAGE — файл ~500 МБ: сборка, калибровка, сохранение ×2, открытие
       # ==========================================================================
       # Модель собирается в ОПРЕДЕЛЕНИЕ dn1_storage текущей модели (внутри
       # undo-операции сцены; без инстансов — вьюпорт не нагружается) и
@@ -1016,10 +1116,10 @@ module Dn1supBenchmark
           msg = "недостаточно места на диске: свободно #{(free / 1_048_576.0).round} МБ, " \
                 "нужно ~#{(need / 1_048_576.0).round} МБ"
           log_line("storage: #{msg}")
-          add_result('storage', 'storage_save', 'Сохранение файла ~130 МБ', 'ms', [],
+          add_result('storage', 'storage_save', 'Сохранение файла ~500 МБ', 'ms', [],
                      status: 'failed',
                      params: { 'error' => msg }, diagnostics: [diag_hash(RuntimeError.new(msg))])
-          add_result('storage', 'storage_open', 'Открытие файла ~130 МБ', 'ms', [],
+          add_result('storage', 'storage_open', 'Открытие файла ~500 МБ', 'ms', [],
                      status: 'failed',
                      params: { 'error' => msg }, diagnostics: [diag_hash(RuntimeError.new(msg))])
           st['storage'] = { 'path' => nil, 'bytes' => 0 }
@@ -1187,7 +1287,7 @@ module Dn1supBenchmark
 
         info = @state['scene_info'] || {}
         if info['path'].nil?
-          return add_skipped('storage', 'storage_open', 'Открытие файла ~130 МБ',
+          return add_skipped('storage', 'storage_open', 'Открытие файла ~500 МБ',
                              cancelled? ? 'отменено пользователем' : 'файл не был собран',
                              status: cancelled? ? 'cancelled' : 'skipped')
         end
@@ -1358,6 +1458,7 @@ module Dn1supBenchmark
 
         fps_stop_tool
         close_scene
+        viewport_restore
         data = run_data
         data['score'] = Score.compute(data) # необязательный общий балл
         @last_run_data = data
@@ -1365,6 +1466,8 @@ module Dn1supBenchmark
         @scene_state = nil
         @run_model = nil
         @baseline_entities = nil
+        @orig_viewport = nil
+        @resolution_request = nil
         @cancel_requested = false
         paths = Report.save_run(data)
         Dn1supBenchmark.last_report = paths['html']

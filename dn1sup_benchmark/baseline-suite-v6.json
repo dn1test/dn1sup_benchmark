@@ -2,23 +2,23 @@
   "profile": "suite",
   "values": {
     "model_build": {
-      "value": 6.7,
+      "value": 12.2,
       "unit": "ms"
     },
     "model_edit_definition": {
-      "value": 0.1,
+      "value": 0.3,
       "unit": "ms"
     },
     "model_traverse": {
-      "value": 4.2,
+      "value": 5.8,
       "unit": "ms"
     },
     "model_explode": {
-      "value": 8.0,
+      "value": 9.3,
       "unit": "ms"
     },
     "fps_components_static": {
-      "value": 60.5,
+      "value": 60.3,
       "unit": "fps"
     },
     "fps_components_orbit": {
@@ -26,15 +26,15 @@
       "unit": "fps"
     },
     "fps_poly_static": {
-      "value": 60.9,
+      "value": 61.2,
       "unit": "fps"
     },
     "fps_poly_orbit": {
-      "value": 61.1,
+      "value": 61.2,
       "unit": "fps"
     },
     "tool_draw": {
-      "value": 36.7,
+      "value": 39.4,
       "unit": "ms"
     },
     "tool_pushpull": {
@@ -54,7 +54,7 @@
       "unit": "ms"
     },
     "tool_followme": {
-      "value": 1.2,
+      "value": 1.3,
       "unit": "ms"
     },
     "tool_intersect": {
@@ -62,44 +62,45 @@
       "unit": "ms"
     },
     "tool_paint": {
-      "value": 0.5,
+      "value": 0.7,
       "unit": "ms"
     },
     "tool_zoom_extents": {
-      "value": 2.3,
+      "value": 2.0,
       "unit": "ms"
     },
     "wave_build": {
-      "value": 8.9,
+      "value": 10.7,
       "unit": "ms"
     },
     "fps_wave_orbit": {
-      "value": 60.3,
+      "value": 60.4,
       "unit": "fps"
     },
     "wave_update_ms": {
-      "value": 2.7,
+      "value": 2.6,
       "unit": "ms"
     },
     "storage_build": {
-      "value": 672.2,
+      "value": 692.4,
       "unit": "ms"
     },
     "storage_save": {
-      "value": 179.9,
+      "value": 558.25,
       "unit": "ms"
     },
     "storage_open": {
-      "value": 726.1,
+      "value": 1917.6,
       "unit": "ms"
     }
   },
   "missing": [],
   "reference": {
-    "source_run": "bench-SU25__suite__20261030-013715",
+    "source_run": "bench-SU25__suite__20261030-132701",
     "sketchup": "25.0.660",
     "ruby": "3.2.2",
+    "resolution": "hd",
     "frozen_at": "2026-10-30",
-    "suite": "5"
+    "suite": "6"
   }
 }

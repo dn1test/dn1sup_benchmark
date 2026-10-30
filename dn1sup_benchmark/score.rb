@@ -10,10 +10,12 @@
 #                  (веса ниже; веса доступных категорий перенормируются).
 # Итог: 1000 ≈ конфигурация из baseline-файла. Шкала условная, привязана
 # к набору тестов; это НЕ рейтинг SketchUp и НЕ сравнение между разными
-# наборами.
+# наборами. FPS-замеры зависят от разрешения вьюпорта: база заморожена на
+# разрешении по умолчанию (reference.resolution); прогон с другим
+# разрешением балл не получает.
 #
 # Балл вычисляется, только если рядом с кодом есть baseline-файл
-# (baseline-<profile>-v5.json, profile = 'suite'). Пропущенные/упавшие тесты
+# (baseline-<profile>-v6.json, profile = 'suite'). Пропущенные/упавшие тесты
 # дают статус partial с перечнем недостающих (не подменяются нулями).
 # =============================================================================
 
@@ -59,6 +61,17 @@ module Dn1supBenchmark
                    'status' => 'unavailable', 'overall' => nil,
                    'reason' => "нет базовых значений для набора «#{profile}» " \
                                '(балл публикуется только при наличии baseline-файла)' }
+        end
+
+        # FPS зависит от разрешения вьюпорта: база нормирована на своё
+        # разрешение — прогон с другим получает unavailable, а не искажённый балл.
+        base_res = baseline.dig('reference', 'resolution')
+        run_res = run_data.dig('meta', 'params', 'resolution')
+        if base_res && run_res && base_res != run_res
+          return { 'score_version' => SCORE_VERSION, 'profile' => profile,
+                   'status' => 'unavailable', 'overall' => nil,
+                   'reason' => "разрешение вьюпорта #{run_res} ≠ базового #{base_res} " \
+                               '(балл нормирован на разрешение базы)' }
         end
 
         by_id = {}
@@ -135,7 +148,7 @@ module Dn1supBenchmark
       end
 
       def load_baseline(profile)
-        path = File.join(Dn1supBenchmark::PLUG_ROOT, "baseline-#{profile}-v5.json")
+        path = File.join(Dn1supBenchmark::PLUG_ROOT, "baseline-#{profile}-v6.json")
         return nil unless File.exist?(path)
 
         JSON.parse(File.read(path))

@@ -7,7 +7,7 @@ require 'json'
 
 module Dn1supBenchmark::Test
   S = Dn1supBenchmark::Score
-  BASELINE_V5 = File.expand_path('../baseline-suite-v5.json', __dir__)
+  BASELINE_V6 = File.expand_path('../baseline-suite-v6.json', __dir__)
 
   def self.score_run(values)
     results = values.map do |id, (value, unit)|
@@ -21,7 +21,7 @@ module Dn1supBenchmark::Test
         'validation' => { 'passed' => true, 'errors' => [] },
         'error' => nil, 'diagnostics' => [], 'value' => value }
     end
-    { 'meta' => { 'profile' => 'suite', 'test_suite_version' => '5' },
+    { 'meta' => { 'profile' => 'suite', 'test_suite_version' => '6' },
       'run' => { 'status' => 'completed' }, 'results' => results }
   end
 
@@ -32,7 +32,7 @@ module Dn1supBenchmark::Test
              'values' => S::INCLUDED.values.flatten.each_with_object({}) do |id, h|
                h[id] = id.start_with?('fps_') ? { 'value' => 50.0, 'unit' => 'fps' } : { 'value' => 100.0, 'unit' => 'ms' }
              end,
-             'reference' => { 'source_run' => 'fake' } }
+             'reference' => { 'source_run' => 'fake', 'resolution' => 'hd' } }
     S.singleton_class.send(:alias_method, :real_load_baseline, :load_baseline)
     S.singleton_class.send(:define_method, :load_baseline) { |profile| profile == 'suite' ? fake : nil }
     yield fake
@@ -95,6 +95,26 @@ module Dn1supBenchmark::Test
     end
   end
 
+  test 'другое разрешение вьюпорта → unavailable с причиной' do
+    with_fake_baseline do |baseline|
+      run = score_run(baseline_values(baseline))
+      run['meta']['params'] = { 'resolution' => 'qhd' }
+      score = S.compute(run)
+      assert_equal('unavailable', score['status'])
+      assert_nil(score['overall'])
+      assert(score['reason'].to_s.include?('qhd'), 'причина называет разрешение прогона')
+    end
+  end
+
+  test 'разрешение базы совпало → балл считается' do
+    with_fake_baseline do |baseline|
+      run = score_run(baseline_values(baseline))
+      run['meta']['params'] = { 'resolution' => 'hd' }
+      score = S.compute(run)
+      assert_equal('complete', score['status'])
+    end
+  end
+
   test 'набор без baseline → unavailable с причиной' do
     with_fake_baseline do
       run = score_run({})
@@ -114,9 +134,9 @@ module Dn1supBenchmark::Test
     end
   end
 
-  test 'реальная база (если заморожена): файл v5 валиден' do
-    skip("нет #{File.basename(BASELINE_V5)} — замораживается живым прогоном") unless File.exist?(BASELINE_V5)
-    base = JSON.parse(File.read(BASELINE_V5))
+  test 'реальная база (если заморожена): файл v6 валиден' do
+    skip("нет #{File.basename(BASELINE_V6)} — замораживается живым прогоном") unless File.exist?(BASELINE_V6)
+    base = JSON.parse(File.read(BASELINE_V6))
     ids = base['values'].keys
     S::INCLUDED.values.flatten.each do |id|
       assert(ids.include?(id), "в базе нет #{id}")

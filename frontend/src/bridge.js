@@ -31,6 +31,9 @@ export const state = reactive({
 
   results: null, // {none:true} | {meta, run, score, groups}
 
+  // Разрешение вьюпорта FPS-замеров: один из ключей Runner::RESOLUTIONS
+  resolution: 'hd',
+
   notice: null // {kind: 'info'|'ok'|'err', text}
 })
 
@@ -139,11 +142,11 @@ function call(name, ...args) {
 
 export function refreshOverview() { call('get_overview') }
 
-export function refreshPlan() { call('get_plan') }
+export function refreshPlan() { call('get_plan', state.resolution) }
 
 export function refreshResults() { call('get_results') }
 
-export function startRun() { call('start_run') }
+export function startRun() { call('start_run', state.resolution) }
 
 export function cancelRun() { call('cancel_run') }
 

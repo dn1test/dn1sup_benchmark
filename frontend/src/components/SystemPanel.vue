@@ -13,8 +13,7 @@ const envRows = computed(() => [
   ['ОС / платформа', (meta.value.os || '') + ' / ' + (meta.value.platform || '')],
   ['CPU', (meta.value.cpu || '?') + ' × ' + (meta.value.cores || '?')],
   ['Масштаб DPI', env.value.ui_scale_factor],
-  ['Вьюпорт', vp.value.width ? vp.value.width + '×' + vp.value.height : null],
-  ['Набор тестов', 'v' + meta.value.test_suite_version + ', схема v' + meta.value.schema_version]
+  ['Вьюпорт', vp.value.width ? vp.value.width + '×' + vp.value.height : null]
 ])
 </script>
 

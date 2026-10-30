@@ -22,13 +22,15 @@ module Dn1supBenchmark
         @running == true
       end
 
-      # Запуск прогона единственным набором. on_event — callable или nil.
-      # Возвращает false, если прогон уже идёт (одновременные прогоны запрещены).
-      def start(on_event = nil)
+      # Запуск прогона единственным набором. resolution — разрешение вьюпорта
+      # FPS-замеров (см. Runner::RESOLUTIONS, nil = по умолчанию); on_event —
+      # callable или nil. Возвращает false, если прогон уже идёт.
+      def start(on_event = nil, resolution = nil)
         return false if running?
 
         @running = true
         @event = on_event
+        Runner.resolution_request = resolution
         @steps = Runner.steps
         @total = @steps.size
         @done = 0

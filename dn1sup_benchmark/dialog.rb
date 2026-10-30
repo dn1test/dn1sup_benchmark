@@ -107,14 +107,14 @@ module Dn1supBenchmark
           push(dlg, 'overview', overview_data)
         end
 
-        dlg.add_action_callback('get_plan') do |_ctx|
-          push(dlg, 'plan', plan_data)
+        dlg.add_action_callback('get_plan') do |_ctx, resolution|
+          push(dlg, 'plan', plan_data(resolution))
         rescue StandardError => e
           push(dlg, 'error', { 'message' => "#{e.class}: #{e.message}" })
         end
 
-        dlg.add_action_callback('start_run') do |_ctx|
-          start_run(dlg)
+        dlg.add_action_callback('start_run') do |_ctx, resolution|
+          start_run(dlg, resolution)
         rescue StandardError => e
           push(dlg, 'error', { 'message' => "#{e.class}: #{e.message}" })
         end
@@ -153,14 +153,14 @@ module Dn1supBenchmark
         JSON.parse(str)
       end
 
-      def plan_data
-        preview = Runner.plan_preview
+      def plan_data(resolution = nil)
+        preview = Runner.plan_preview(resolution)
         by_cat = preview['steps'].group_by { |s| s['category'].to_s }
         preview['categories'] = by_cat.map { |cat, steps| { 'category' => cat, 'count' => steps.size } }
         preview
       end
 
-      def start_run(dlg)
+      def start_run(dlg, resolution = nil)
         if Sequencer.running?
           push(dlg, 'notice', { 'message' => 'Прогон уже идёт' })
           return
@@ -173,11 +173,13 @@ module Dn1supBenchmark
 
         # Подтверждение согласия — в UI диалога (кнопка «Запустить» с памяткой),
         # здесь дублируем краткую памятку.
+        res = Runner.normalize_resolution(resolution)
         push(dlg, 'notice',
-             { 'message' => "Старт (набор v#{Runner::SUITE_VERSION}): временно создаётся и откатывается геометрия в " \
-                            "«#{model.title}». Не переключайте вкладки моделей до конца прогона." })
-        puts "[dn1sup_benchmark] старт прогона из диалога"
-        Sequencer.start(->(ev) { push_event(dlg, ev) })
+             { 'message' => "Старт (набор v#{Runner::SUITE_VERSION}, вид #{res}): " \
+                            "временно создаётся и откатывается геометрия в «#{model.title}». " \
+                            'Не переключайте вкладки моделей до конца прогона.' })
+        puts "[dn1sup_benchmark] старт прогона из диалога (вид #{res})"
+        Sequencer.start(->(ev) { push_event(dlg, ev) }, res)
       end
 
       def run_results_data(data)

@@ -11,10 +11,14 @@ module Dn1supBenchmark::Test
 
   test 'dialog: plan_data отдаёт шаги и категории' do
     data = D.send(:plan_data)
-    assert(data['steps'].size >= 12, 'полный план шагов (suite v5: 14 шагов)')
+    assert(data['steps'].size >= 12, 'полный план шагов (suite v6: 14 шагов)')
     assert(data['categories'].is_a?(Array) && !data['categories'].empty?, 'категории для фильтра')
     assert(data['params'].is_a?(Hash), 'параметры набора')
     assert_equal('suite', data['profile'], 'один набор без выбора')
+    assert_equal(500, data['params']['target_mb'], 'цель файла 500 МБ')
+    assert_equal('hd', data['params']['resolution'], 'разрешение вьюпорта по умолчанию')
+    assert_equal('qhd', D.send(:plan_data, 'qhd')['params']['resolution'],
+                 'выбранное разрешение проходит через панель')
   end
 
   test 'dialog: plan_data содержит предупреждение о файле' do
@@ -24,7 +28,7 @@ module Dn1supBenchmark::Test
   test 'dialog: run_results_data группирует результаты' do
     run = {
       'meta' => { 'sketchup_version' => '27.0', 'profile' => 'suite', 'started_at' => 'x',
-                  'test_suite_version' => '5', 'ruby_version' => RUBY_VERSION, 'cpu' => 'T' },
+                  'test_suite_version' => '6', 'ruby_version' => RUBY_VERSION, 'cpu' => 'T' },
       'run' => { 'status' => 'completed' },
       'results' => [
         { 'id' => 'tool_draw', 'name' => 'Черчение', 'group' => 'tools', 'status' => 'passed',

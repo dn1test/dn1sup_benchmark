@@ -20,11 +20,22 @@ module Dn1supBenchmark::Test
     p = R.suite_params
     assert_equal(R::SUITE['storage']['boxes'], p['storage']['boxes'])
     assert_equal('suite', p['profile'], 'в параметрах есть имя профиля для отчёта')
+    assert_equal('hd', p['resolution'], 'разрешение по умолчанию')
     p['storage']['boxes'] = 1
     p['target_mb'] = 9999
     assert_equal(R::SUITE['storage']['boxes'], R.suite_params['storage']['boxes'],
                  'изменение копии не трогает константу набора')
-    assert_equal(130, R.suite_params['target_mb'], 'цель файла фиксирована')
+    assert_equal(500, R.suite_params['target_mb'], 'цель файла фиксирована')
+  end
+
+  test 'RESOLUTIONS: три разрешения, нормализация неизвестного → hd' do
+    assert_equal(%w[fhd hd qhd], R::RESOLUTIONS.keys.sort, 'ровно три разрешения')
+    assert_equal('hd', R.normalize_resolution(nil), 'nil → hd')
+    assert_equal('hd', R.normalize_resolution('bogus'), 'неизвестное → hd')
+    assert_equal('qhd', R.normalize_resolution('qhd'), 'известное проходит')
+    R::RESOLUTIONS.each_value do |(w, h)|
+      assert(w >= 640 && h >= 360, "разрешение #{w}x#{h} слишком мало")
+    end
   end
 
   test 'лимиты безопасности (уроки инцидентов SU2027)' do
@@ -40,7 +51,7 @@ module Dn1supBenchmark::Test
     assert(prof['fps_s'] <= 3.0, "fps_s=#{prof['fps_s']} слишком долго")
   end
 
-  test 'steps: план v5 (5 сцен, 4 fps, волна, storage_open)' do
+  test 'steps: план v6 (5 сцен, 4 fps, волна, storage_open)' do
     steps = R.steps
     kinds = steps.map { |s| s['kind'] }
     assert_equal('begin', kinds.first)
@@ -55,19 +66,23 @@ module Dn1supBenchmark::Test
     refute(kinds.include?('doc'), 'DOC-шаг удалён (suite v4)')
     modes = steps.select { |s| s['kind'] == 'fps' }.map { |s| s['mode'] }
     refute(modes.include?('pages'), 'page-switch запрещён (инцидент 2026-10-28)')
-    assert_equal(130, R::SUITE['target_mb'], 'цель файла набора ~130 МБ (прогон ~1 минута)')
+    assert_equal(500, R::SUITE['target_mb'], 'цель файла набора ~500 МБ')
   end
 
-  test 'предупреждение набора упоминает файл и минуту' do
+  test 'предупреждение набора упоминает файл и длительность' do
     assert(R::SUITE_WARNING.include?('МБ'), 'предупреждение о файле обязательно')
     assert(R::SUITE_WARNING.include?('минут'), 'предупреждение о длительности прогона')
   end
 
-  test 'plan_preview: полный план с предупреждением' do
+  test 'plan_preview: полный план с предупреждением и разрешением' do
     pp = R.plan_preview
     assert(pp['warning'].to_s.include?('МБ'), 'предупреждение должно упоминать файл')
     assert_equal(R.steps.size, pp['steps'].size, 'в превью все шаги')
     assert_equal('suite', pp['profile'], 'превью называет единственный набор')
+    assert_equal('hd', pp['params']['resolution'], 'дефолтное разрешение в плане')
+    assert_equal('1920x1080', pp['resolutions']['fhd'], 'список доступных разрешений')
+    assert_equal('qhd', R.plan_preview('qhd')['params']['resolution'],
+                 'выбранное разрешение попадает в план')
   end
 
   test 'median: нечётное, чётное, пустое' do

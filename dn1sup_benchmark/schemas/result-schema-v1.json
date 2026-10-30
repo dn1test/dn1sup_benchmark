@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://github.com/dn1test/dn1sup_benchmark/schemas/result-schema-v1.json",
   "title": "dn1sup_benchmark run report (schema v1)",
-  "description": "Отчёт прогона бенчмарка dn1sup_benchmark 0.7.0+ (suite v5: один набор, пять категорий ТЗ). Отсутствующие показатели — null (не нули).",
+  "description": "Отчёт прогона бенчмарка dn1sup_benchmark 0.8.0+ (suite v6: один набор, файл ~500 МБ, пять категорий ТЗ). Отсутствующие показатели — null (не нули).",
   "type": "object",
   "required": ["meta", "results"],
   "properties": {

@@ -1,8 +1,14 @@
 <script setup>
 import { computed } from 'vue'
-import { state } from '../bridge'
+import { state, refreshPlan } from '../bridge'
 
 const plan = computed(() => state.plan)
+
+const RESOLUTION_OPTIONS = [
+  { value: 'hd', label: '1280×720 (HD) — база балла' },
+  { value: 'fhd', label: '1920×1080 (FHD)' },
+  { value: 'qhd', label: '2560×1440 (QHD)' }
+]
 
 const planParams = computed(() => {
   const p = plan.value
@@ -27,7 +33,19 @@ const planParams = computed(() => {
 <template>
   <div>
     <div class="mb-2 text-xs text-slate-500 dark:text-slate-400">
-      Набор один, без выбора: 5 категорий, полный прогон ~1 минута.
+      Набор один, без выбора: 5 категорий, полный прогон ~1–2,5 минуты
+      (первый на машине дольше — генерация текстур).
+    </div>
+    <div class="mb-2 grid grid-cols-2 gap-2">
+      <div>
+        <label class="ss-label mb-1 block">Разрешение вьюпорта (FPS)</label>
+        <select v-model="state.resolution" class="ss-input !py-1 text-xs" @change="refreshPlan">
+          <option v-for="r in RESOLUTION_OPTIONS" :key="r.value" :value="r.value">{{ r.label }}</option>
+        </select>
+      </div>
+      <div class="self-end text-[11px] leading-4 text-slate-400 dark:text-slate-500">
+        Окно переформатируется под выбранное; балл нормирован на HD.
+      </div>
     </div>
     <div class="rounded-lg border border-slate-200 p-2.5 dark:border-slate-800">
       <h3 class="ss-label mb-2">Нагрузка и план</h3>
